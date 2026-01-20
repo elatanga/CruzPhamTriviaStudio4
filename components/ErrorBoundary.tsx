@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { logger } from '../services/logger';
 
 interface Props {
@@ -11,28 +11,25 @@ interface State {
 }
 
 export class ErrorBoundary extends React.Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-    this.state = {
-      hasError: false,
-      error: null
-    };
-  }
+  public state: State = {
+    hasError: false,
+    error: null
+  };
 
-  static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     logger.error('Uncaught error in component tree', { error, errorInfo });
   }
 
-  handleReset = () => {
+  public handleReset = () => {
     this.setState({ hasError: false, error: null });
     window.location.reload();
   };
 
-  render() {
+  public render() {
     if (this.state.hasError) {
       return (
         <div className="h-screen w-screen flex flex-col items-center justify-center bg-black text-gold-500 p-8 text-center font-sans">

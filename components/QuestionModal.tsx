@@ -89,8 +89,9 @@ export const QuestionModal: React.FC<Props> = ({
         break;
       case 'void':
         if (isRevealed) {
-          soundService.playVoid();
-          if (confirm('Mark this question as VOID? It will be unplayable.')) {
+          // Explicitly confirm before destroying the question state
+          if (window.confirm('Mark this question as VOID?\n\nThis will lock the tile and close the view. It can only be reset from the Director Panel.')) {
+            soundService.playVoid();
             onClose('void');
           }
         }
@@ -125,7 +126,7 @@ export const QuestionModal: React.FC<Props> = ({
           break;
         case 'Escape':
           e.preventDefault();
-          handleAction('void'); // Double check confirmation handled in func
+          handleAction('void');
           break;
         case 'Backspace':
           e.preventDefault();
@@ -199,13 +200,14 @@ export const QuestionModal: React.FC<Props> = ({
                 {players.filter(p => p.id !== selectedPlayerId).map(p => (
                   <button
                     key={p.id}
+                    type="button"
                     onClick={() => onClose('steal', p.id)}
                     className="bg-zinc-900 border border-zinc-700 hover:border-purple-500 hover:bg-purple-900/20 p-6 rounded text-xl font-bold text-white transition-all"
                   >
                     {p.name}
                   </button>
                 ))}
-                <button onClick={() => setShowStealSelect(false)} className="col-span-full mt-4 text-zinc-500 hover:text-white uppercase text-sm">Cancel Steal</button>
+                <button type="button" onClick={() => setShowStealSelect(false)} className="col-span-full mt-4 text-zinc-500 hover:text-white uppercase text-sm">Cancel Steal</button>
               </div>
             </div>
           )}
@@ -218,6 +220,7 @@ export const QuestionModal: React.FC<Props> = ({
             {/* Reveal Button (Only Active Phase 1) */}
             {!isRevealed ? (
               <button 
+                type="button"
                 onClick={() => handleAction('reveal')}
                 className="bg-gold-600 hover:bg-gold-500 text-black font-black text-xl px-12 py-4 rounded-lg shadow-lg uppercase tracking-wider flex items-center gap-3 transition-transform active:scale-95"
               >
@@ -227,6 +230,7 @@ export const QuestionModal: React.FC<Props> = ({
               // Phase 2 Buttons
               <>
                 <button 
+                  type="button"
                   onClick={() => handleAction('return')}
                   className="flex flex-col items-center gap-1 text-zinc-500 hover:text-blue-400 transition-colors px-4"
                 >
@@ -235,6 +239,7 @@ export const QuestionModal: React.FC<Props> = ({
                 </button>
 
                 <button 
+                  type="button"
                   onClick={() => handleAction('void')}
                   className="flex flex-col items-center gap-1 text-zinc-500 hover:text-red-500 transition-colors px-4"
                 >
@@ -245,6 +250,7 @@ export const QuestionModal: React.FC<Props> = ({
                 <div className="w-px h-12 bg-zinc-800 mx-2" />
 
                 <button 
+                  type="button"
                   onClick={() => handleAction('steal')}
                   className="flex flex-col items-center gap-1 text-purple-500 hover:text-purple-300 transition-colors px-4 group"
                 >
@@ -253,6 +259,7 @@ export const QuestionModal: React.FC<Props> = ({
                 </button>
 
                 <button 
+                  type="button"
                   onClick={() => handleAction('award')}
                   disabled={!selectedPlayerId}
                   className="flex flex-col items-center gap-1 text-green-500 hover:text-green-300 transition-colors px-4 group disabled:opacity-30 disabled:cursor-not-allowed"

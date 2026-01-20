@@ -13,10 +13,11 @@ interface Props {
   isPoppedOut?: boolean;
   onBringBack?: () => void;
   addToast: (type: any, msg: string) => void;
+  onClose?: () => void;
 }
 
 export const DirectorPanel: React.FC<Props> = ({ 
-  gameState, onUpdateState, onPopout, isPoppedOut, onBringBack, addToast 
+  gameState, onUpdateState, onPopout, isPoppedOut, onBringBack, addToast, onClose 
 }) => {
   const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD'>('BOARD');
   const [editingQuestion, setEditingQuestion] = useState<{cIdx: number, qIdx: number} | null>(null);
@@ -71,13 +72,14 @@ export const DirectorPanel: React.FC<Props> = ({
     const oldQ = newCats[cIdx].questions[qIdx];
     
     // Check if replacing a voided question -> unlock it
-    const isUnvoiding = oldQ.isVoided && !q.isVoided;
+    const isUnvoiding = oldQ.isVoided && !q.isVoided && q.isVoided !== undefined;
     
     newCats[cIdx].questions[qIdx] = { 
       ...oldQ, 
       ...q,
       // If we are actively saving from editor, ensure it's playable if previously voided and user wants to replace
-      isVoided: isUnvoiding ? false : (q.isVoided ?? oldQ.isVoided),
+      isVoided: q.isVoided !== undefined ? q.isVoided : oldQ.isVoided,
+      // If we unvoid, we must also reset the game flags
       isAnswered: isUnvoiding ? false : (q.isAnswered ?? oldQ.isAnswered),
       isRevealed: isUnvoiding ? false : (q.isRevealed ?? oldQ.isRevealed)
     };
@@ -88,6 +90,8 @@ export const DirectorPanel: React.FC<Props> = ({
     if (isUnvoiding) {
       addToast('success', 'Question replaced and unlocked.');
       logger.info('voidReplaceApplied', { id: oldQ.id });
+    } else {
+      addToast('success', 'Question updated.');
     }
   };
 
@@ -150,16 +154,27 @@ export const DirectorPanel: React.FC<Props> = ({
 
   if (isPoppedOut) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-zinc-500 space-y-4">
+      <div className="flex flex-col items-center justify-center h-full text-zinc-500 space-y-4 bg-zinc-950">
         <ExternalLink className="w-16 h-16 text-gold-500" />
         <h2 className="text-2xl font-serif text-white">Director is Popped Out</h2>
         <p className="max-w-xs text-center text-sm">Controls are active in the separate window. Close that window or click below to return control here.</p>
-        <button 
-          onClick={onBringBack}
-          className="bg-zinc-800 hover:bg-gold-600 hover:text-black text-white px-6 py-2 rounded font-bold uppercase tracking-wider transition-colors"
-        >
-          Bring Back
-        </button>
+        <div className="flex gap-3">
+          <button 
+            onClick={onBringBack}
+            className="bg-zinc-800 hover:bg-gold-600 hover:text-black text-white px-6 py-2 rounded font-bold uppercase tracking-wider transition-colors"
+          >
+            Bring Back
+          </button>
+          {onClose && (
+            <button 
+              type="button"
+              onClick={() => { soundService.playClick(); onClose(); }}
+              className="border border-zinc-700 hover:bg-zinc-800 text-zinc-400 hover:text-white px-6 py-2 rounded font-bold uppercase tracking-wider transition-colors flex items-center gap-2"
+            >
+              <X className="w-4 h-4" /> Close Panel
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -188,6 +203,18 @@ export const DirectorPanel: React.FC<Props> = ({
             <button onClick={() => { soundService.playClick(); onPopout(); }} className="flex items-center gap-2 text-xs font-bold uppercase text-gold-500 border border-gold-900/50 px-3 py-1.5 rounded hover:bg-gold-900/20">
               <ExternalLink className="w-3 h-3" /> Detach
             </button>
+          )}
+          {onClose && (
+             <>
+               <div className="w-px h-6 bg-zinc-800 mx-2" />
+               <button 
+                 type="button"
+                 onClick={() => { soundService.playClick(); onClose(); }}
+                 className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-400 hover:text-red-400 px-3 py-1.5 rounded hover:bg-zinc-900 transition-colors"
+               >
+                 <X className="w-4 h-4" /> Close
+               </button>
+             </>
           )}
         </div>
       </div>
@@ -405,7 +432,18 @@ export const DirectorPanel: React.FC<Props> = ({
                   onClick={() => {
                      const txt = (document.getElementById('dir-q-text') as HTMLTextAreaElement).value;
                      const ans = (document.getElementById('dir-q-answer') as HTMLTextAreaElement).value;
-                     handleSaveQuestion(cIdx, qIdx, { text: txt, answer: ans });
+                     
+                     // Prepare update object
+                     const updates: Partial<Question> = { text: txt, answer: ans };
+                     
+                     // If the question was voided, explicitly reset the state to unlock it
+                     if (q.isVoided) {
+                        updates.isVoided = false;
+                        updates.isAnswered = false;
+                        updates.isRevealed = false;
+                     }
+                     
+                     handleSaveQuestion(cIdx, qIdx, updates);
                   }}
                   className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-6 py-2 rounded flex items-center gap-2"
                 >

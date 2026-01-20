@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppShell } from './components/AppShell';
 import { ToastContainer } from './components/Toast';
 import { LoginScreen } from './components/LoginScreen';
@@ -16,7 +16,7 @@ import { dataService } from './services/dataService';
 import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session } from './types';
 import { soundService } from './services/soundService';
 import { logger } from './services/logger';
-import { Monitor, Grid, Shield, Copy, Loader2 } from 'lucide-react';
+import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power } from 'lucide-react';
 
 const App: React.FC = () => {
   // App Boot State
@@ -32,6 +32,7 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'BOARD' | 'DIRECTOR' | 'ADMIN'>('BOARD');
   const [isPopoutView, setIsPopoutView] = useState(false); 
   const [isDirectorPoppedOut, setIsDirectorPoppedOut] = useState(false); 
+  const directorWindowRef = useRef<Window | null>(null);
 
   // --- ADMIN NOTIFICATIONS ---
   const [pendingRequests, setPendingRequests] = useState(0);
@@ -67,6 +68,10 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Use Ref to access latest state in event listeners without re-binding
+  const gameStateRef = useRef(gameState);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
   // UI State Persistence Effect
   useEffect(() => {
     if (session) {
@@ -77,6 +82,66 @@ const App: React.FC = () => {
       localStorage.setItem('cruzpham_ui_state', JSON.stringify(uiState));
     }
   }, [activeShow, viewMode, session]);
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // 1. Focus Guard: Don't trigger if user is typing in an input
+      const active = document.activeElement;
+      const tagName = active?.tagName.toLowerCase();
+      const isInput = tagName === 'input' || tagName === 'textarea' || (active as HTMLElement)?.isContentEditable;
+      if (isInput) return;
+
+      const state = gameStateRef.current;
+
+      // 2. Player Selection (Arrows)
+      if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+        e.preventDefault(); // Prevent page scroll
+        
+        if (state.players.length === 0) return;
+        
+        const currentIdx = state.players.findIndex(p => p.id === state.selectedPlayerId);
+        // If no player selected (-1), default to 0
+        let newIdx = currentIdx === -1 ? 0 : currentIdx;
+
+        if (e.code === 'ArrowUp') {
+          newIdx = currentIdx - 1;
+          if (newIdx < 0) newIdx = state.players.length - 1; // Wrap to bottom
+        } else {
+          newIdx = currentIdx + 1;
+          if (newIdx >= state.players.length) newIdx = 0; // Wrap to top
+        }
+
+        const newId = state.players[newIdx].id;
+        if (newId !== state.selectedPlayerId) {
+          soundService.playSelect();
+          const newState = { ...state, selectedPlayerId: newId };
+          localStorage.setItem('cruzpham_gamestate', JSON.stringify(newState));
+          setGameState(newState);
+        }
+        return;
+      }
+
+      // 3. Score Adjustment (+/-)
+      // Checks for '=', '+', '-', '_' to handle both Shift and non-Shift states
+      if (['=', '+', '-', '_'].includes(e.key)) {
+         if (!state.selectedPlayerId) return;
+         
+         const delta = (e.key === '=' || e.key === '+') ? 100 : -100;
+         soundService.playClick();
+         
+         const newState = {
+           ...state,
+           players: state.players.map(p => p.id === state.selectedPlayerId ? { ...p, score: p.score + delta } : p)
+         };
+         localStorage.setItem('cruzpham_gamestate', JSON.stringify(newState));
+         setGameState(newState);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   // Admin Polling
   useEffect(() => {
@@ -219,6 +284,7 @@ const App: React.FC = () => {
     );
 
     if (win) {
+      directorWindowRef.current = win;
       setIsDirectorPoppedOut(true);
       addToast('info', 'Director Panel detached.');
       logger.info('popoutOpened');
@@ -228,6 +294,10 @@ const App: React.FC = () => {
   };
 
   const handleBringBack = () => {
+    if (directorWindowRef.current) {
+        directorWindowRef.current.close();
+        directorWindowRef.current = null;
+    }
     setIsDirectorPoppedOut(false);
     logger.info('popoutClosed');
   };
@@ -539,14 +609,21 @@ const App: React.FC = () => {
                         <div className="flex flex-col md:flex-row h-full w-full overflow-hidden">
                           {/* Board Area */}
                           <div className="flex-1 order-2 md:order-1 h-full overflow-hidden relative flex flex-col min-w-0">
-                             {/* End Game Button Bar - Minimalist */}
-                            <div className="flex-none p-1 flex justify-start border-b border-zinc-900 bg-black z-20">
-                              <button onClick={() => { if(confirm("End game?")) setGameState(p => ({...p, isGameStarted: false})); }} className="text-[10px] uppercase text-zinc-500 hover:text-red-400 font-bold tracking-wider px-2 py-1">
-                                &larr; End Show
+                             {/* Game Board Header / Control Bar */}
+                            <div className="flex-none h-10 px-4 flex items-center justify-between border-b border-zinc-800 bg-zinc-950 z-20">
+                              <button 
+                                onClick={() => { if(confirm("End game?")) setGameState(p => ({...p, isGameStarted: false})); }} 
+                                className="text-xs uppercase text-red-500 hover:text-red-400 font-bold tracking-wider flex items-center gap-2"
+                              >
+                                <Power className="w-3 h-3" /> End Show
                               </button>
-                              <div className="flex-1" />
-                              <button onClick={() => setViewMode('DIRECTOR')} className="text-[10px] uppercase text-zinc-500 hover:text-white font-bold tracking-wider px-2 py-1 md:hidden">
-                                Director
+                              
+                              <button 
+                                onClick={() => setViewMode('DIRECTOR')} 
+                                className={`text-xs uppercase font-bold tracking-wider flex items-center gap-2 px-3 py-1.5 rounded transition-colors ${isDirectorPoppedOut ? 'bg-zinc-900 text-gold-500 border border-gold-900/50' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}
+                              >
+                                {isDirectorPoppedOut ? <ExternalLink className="w-3 h-3" /> : <Grid className="w-3 h-3" />}
+                                <span>Director {isDirectorPoppedOut ? '(Detached)' : ''}</span>
                               </button>
                             </div>
 
@@ -604,6 +681,7 @@ const App: React.FC = () => {
                      isPoppedOut={isDirectorPoppedOut}
                      onBringBack={handleBringBack}
                      addToast={addToast}
+                     onClose={() => setViewMode('BOARD')}
                    />
                  </div>
 
