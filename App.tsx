@@ -11,6 +11,7 @@ import { QuestionModal } from './components/QuestionModal';
 import { ShortcutsPanel } from './components/ShortcutsPanel';
 import { DirectorPanel } from './components/DirectorPanel';
 import { AdminPanel } from './components/AdminPanel';
+import { ConfirmationModal } from './components/ConfirmationModal';
 import { authService } from './services/authService';
 import { dataService } from './services/dataService';
 import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session } from './types';
@@ -33,6 +34,9 @@ const App: React.FC = () => {
   const [isPopoutView, setIsPopoutView] = useState(false); 
   const [isDirectorPoppedOut, setIsDirectorPoppedOut] = useState(false); 
   const directorWindowRef = useRef<Window | null>(null);
+
+  // --- MODALS ---
+  const [showEndGameConfirm, setShowEndGameConfirm] = useState(false);
 
   // --- ADMIN NOTIFICATIONS ---
   const [pendingRequests, setPendingRequests] = useState(0);
@@ -376,6 +380,44 @@ const App: React.FC = () => {
       }
     };
     saveGameState(newState);
+    // Switch to board view automatically if in another tab
+    if (viewMode !== 'BOARD') setViewMode('BOARD');
+  };
+
+  const handleEndGame = () => {
+    try {
+      logger.info('endGameAttempt', { showId: activeShow?.id });
+
+      // Clean cleanup of Director Window
+      if (isDirectorPoppedOut) {
+         handleBringBack();
+      }
+
+      // Safe Reset of Game State
+      setGameState(prev => {
+        const newState: GameState = {
+          ...prev,
+          isGameStarted: false,
+          activeQuestionId: null,
+          activeCategoryId: null,
+          // Reset timer but keep duration preference
+          timer: { ...prev.timer, endTime: null, isRunning: false }
+        };
+        // Persist the closed state immediately
+        localStorage.setItem('cruzpham_gamestate', JSON.stringify(newState));
+        return newState;
+      });
+
+      // Reset View to ensure Dashboard is visible
+      setViewMode('BOARD');
+
+      setShowEndGameConfirm(false);
+      addToast('info', 'Game Session Ended');
+      logger.info('endGameSuccess');
+    } catch (e: any) {
+      logger.error('endGameFail', { error: e });
+      addToast('error', 'Could not end game cleanly.');
+    }
   };
 
   const handleSelectQuestion = (catId: string, qId: string) => {
@@ -536,6 +578,15 @@ const App: React.FC = () => {
       shortcuts={showShortcuts ? <ShortcutsPanel /> : null}
     >
       <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <ConfirmationModal 
+         isOpen={showEndGameConfirm}
+         title="End Game?"
+         message="This will close the current game session and return to the template library. Any unsaved scores will be kept in history but the board will close."
+         confirmLabel="End Game"
+         isDanger={true}
+         onConfirm={handleEndGame}
+         onCancel={() => setShowEndGameConfirm(false)}
+      />
       
       {!session ? (
         <LoginScreen onLoginSuccess={handleLoginSuccess} addToast={addToast} />
@@ -612,7 +663,8 @@ const App: React.FC = () => {
                              {/* Game Board Header / Control Bar */}
                             <div className="flex-none h-10 px-4 flex items-center justify-between border-b border-zinc-800 bg-zinc-950 z-20">
                               <button 
-                                onClick={() => { if(confirm("End game?")) setGameState(p => ({...p, isGameStarted: false})); }} 
+                                onClick={() => { soundService.playClick(); setShowEndGameConfirm(true); }} 
+                                type="button"
                                 className="text-xs uppercase text-red-500 hover:text-red-400 font-bold tracking-wider flex items-center gap-2"
                               >
                                 <Power className="w-3 h-3" /> End Show
