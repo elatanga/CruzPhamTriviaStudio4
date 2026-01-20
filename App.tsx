@@ -332,6 +332,7 @@ const App: React.FC = () => {
   const activeCategory = gameState.categories.find(c => c.id === gameState.activeCategoryId);
   const activeQuestion = activeCategory?.questions.find(q => q.id === gameState.activeQuestionId);
   const isAdmin = session?.role === 'ADMIN' || session?.role === 'MASTER_ADMIN';
+  const showShortcuts = viewMode === 'BOARD' && gameState.isGameStarted;
 
   return (
     <AppShell 
@@ -344,6 +345,7 @@ const App: React.FC = () => {
         localStorage.removeItem('cruzpham_gamestate');
         setViewMode('BOARD');
       }}
+      shortcuts={showShortcuts ? <ShortcutsPanel /> : null}
     >
       <ToastContainer toasts={toasts} removeToast={removeToast} />
       
@@ -445,10 +447,6 @@ const App: React.FC = () => {
                                 gameActive={gameState.isGameStarted} 
                             />
                           </div>
-                        </div>
-                        
-                        <div className="hidden md:block">
-                          <ShortcutsPanel />
                         </div>
                         
                         {activeQuestion && activeCategory && (

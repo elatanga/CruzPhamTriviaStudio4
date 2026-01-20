@@ -8,9 +8,10 @@ interface AppShellProps {
   activeShowTitle?: string;
   username?: string | null;
   onLogout?: () => void;
+  shortcuts?: React.ReactNode;
 }
 
-export const AppShell: React.FC<AppShellProps> = ({ children, activeShowTitle, username, onLogout }) => {
+export const AppShell: React.FC<AppShellProps> = ({ children, activeShowTitle, username, onLogout, shortcuts }) => {
   const [muted, setMuted] = useState(soundService.getMute());
   const [volume, setVolume] = useState(soundService.getVolume());
   const [showVolSlider, setShowVolSlider] = useState(false);
@@ -98,25 +99,35 @@ export const AppShell: React.FC<AppShellProps> = ({ children, activeShowTitle, u
         {children}
       </main>
 
-      {/* FOOTER: Fixed */}
-      <footer className="flex-none h-10 bg-black z-20 border-t border-gold-900/30 flex items-center justify-between px-4 md:px-6">
-        <div className="text-[10px] font-mono tracking-widest text-gray-600 uppercase flex gap-4">
-          <span>© CRUZPHAM STUDIOS</span>
+      {/* FOOTER: Auto height based on content, but typically fixed at bottom */}
+      <footer className="flex-none bg-black z-20 border-t border-gold-900/30 flex flex-col md:flex-row items-center justify-between px-4 py-2 gap-3 min-h-[40px]">
+        {/* Credits */}
+        <div className="text-[9px] font-mono tracking-widest text-gray-600 uppercase flex flex-col md:flex-row items-center gap-1 md:gap-4 text-center md:text-left">
+          <span>CREATED BY EL CRUZPHAM</span>
+          <span className="hidden md:inline text-zinc-800">|</span>
+          <span>POWERED BY CRUZPHAM AGENCY</span>
         </div>
         
+        {/* Shortcuts Panel (Dynamic) */}
+        {shortcuts && (
+          <div className="order-last md:order-none w-full md:w-auto border-t border-zinc-900 md:border-t-0 pt-2 md:pt-0">
+            {shortcuts}
+          </div>
+        )}
+
         {/* Sound Controls */}
-        <div className="relative" ref={sliderRef}>
+        <div className="relative flex-none" ref={sliderRef}>
            <div 
              className="flex items-center gap-2 text-zinc-500 hover:text-gold-500 transition-colors text-[10px] uppercase font-bold tracking-wider cursor-pointer select-none bg-zinc-900/50 px-2 py-1 rounded"
              onClick={() => setShowVolSlider(!showVolSlider)}
            >
               {muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-              <span>Sound: {muted ? 'Off' : 'On'}</span>
+              <span className="hidden sm:inline">Sound: {muted ? 'Off' : 'On'}</span>
            </div>
 
            {/* Volume Popover */}
            {showVolSlider && (
-             <div className="absolute bottom-full right-0 mb-2 bg-zinc-900 border border-gold-600/50 p-3 rounded shadow-xl flex flex-col items-center gap-2 min-w-[120px] animate-in slide-in-from-bottom-2 fade-in">
+             <div className="absolute bottom-full right-0 mb-2 bg-zinc-900 border border-gold-600/50 p-3 rounded shadow-xl flex flex-col items-center gap-2 min-w-[120px] animate-in slide-in-from-bottom-2 fade-in z-50">
                <div className="flex justify-between w-full items-center mb-1">
                  <span className="text-[10px] text-zinc-400 uppercase font-bold">Volume</span>
                  <button onClick={toggleMute} className="text-gold-500 hover:text-white">
