@@ -84,36 +84,60 @@ export const generateTriviaGame = async (
       const rawData = JSON.parse(response.text || "[]");
       
       // Map to domain
-      const categories: Category[] = rawData.map((cat: any, cIdx: number) => ({
-        id: generateId(),
-        title: cat.categoryName,
-        questions: (cat.questions || []).map((q: any, qIdx: number) => ({
+      const categories: Category[] = rawData.map((cat: any, cIdx: number) => {
+        const questions: Question[] = (cat.questions || []).map((q: any, qIdx: number) => ({
           id: generateId(),
           text: q.questionText,
           points: (qIdx + 1) * 100, // Auto-generate points
           answer: q.answer,
           isRevealed: false,
           isAnswered: false,
-        }))
-      }));
-
-      // Robustness: Fill gaps
-      while (categories.length < numCategories) {
-        categories.push({ id: generateId(), title: `Category ${categories.length+1}`, questions: [] });
-      }
-      categories.forEach(cat => {
-        while (cat.questions.length < numQuestions) {
-          const nextPoints = (cat.questions.length + 1) * 100;
-          cat.questions.push({
+          isDoubleOrNothing: false // Default, set below
+        }));
+        
+        // Robustness: Fill gaps
+        while (questions.length < numQuestions) {
+          const nextPoints = (questions.length + 1) * 100;
+          questions.push({
             id: generateId(),
             text: "Placeholder Question",
             answer: "Placeholder Answer",
             points: nextPoints,
             isRevealed: false,
-            isAnswered: false
+            isAnswered: false,
+            isDoubleOrNothing: false
           });
         }
+
+        // Assign exactly ONE Double Or Nothing per category
+        const luckyIndex = Math.floor(Math.random() * questions.length);
+        questions[luckyIndex].isDoubleOrNothing = true;
+
+        return {
+          id: generateId(),
+          title: cat.categoryName,
+          questions
+        };
       });
+
+      // Robustness: Fill missing categories
+      while (categories.length < numCategories) {
+        const qs = [];
+        for(let i=0; i<numQuestions; i++) {
+           qs.push({
+            id: generateId(),
+            text: "Placeholder Question",
+            answer: "Placeholder Answer",
+            points: (i+1)*100,
+            isRevealed: false,
+            isAnswered: false,
+            isDoubleOrNothing: false
+          });
+        }
+        const lucky = Math.floor(Math.random() * qs.length);
+        qs[lucky].isDoubleOrNothing = true;
+        categories.push({ id: generateId(), title: `Category ${categories.length+1}`, questions: qs });
+      }
 
       return categories;
 
@@ -187,13 +211,22 @@ export const generateCategoryQuestions = async (
     });
 
     const data = JSON.parse(response.text || "[]");
-    return data.map((item: any, idx: number) => ({
+    const questions: Question[] = data.map((item: any, idx: number) => ({
       id: generateId(),
       text: item.question,
       answer: item.answer,
       points: (idx + 1) * 100,
       isRevealed: false,
-      isAnswered: false
+      isAnswered: false,
+      isDoubleOrNothing: false
     }));
+
+    // Ensure one Double Or Nothing
+    if (questions.length > 0) {
+      const lucky = Math.floor(Math.random() * questions.length);
+      questions[lucky].isDoubleOrNothing = true;
+    }
+
+    return questions;
   });
 };

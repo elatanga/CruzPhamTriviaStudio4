@@ -152,7 +152,11 @@ const App: React.FC = () => {
   const handlePlayTemplate = (template: GameTemplate) => {
     // Initialize Categories
     const initCategories = template.categories.map(cat => {
-      const luckyIndex = Math.floor(Math.random() * cat.questions.length);
+      // Logic to preserve or assign Double Or Nothing
+      // If template has specific assignments, use them. If none found in whole category (legacy), assign one.
+      const hasDouble = cat.questions.some(q => q.isDoubleOrNothing);
+      const luckyIndex = !hasDouble ? Math.floor(Math.random() * cat.questions.length) : -1;
+
       return {
         ...cat,
         questions: cat.questions.map((q, idx) => ({
@@ -160,7 +164,8 @@ const App: React.FC = () => {
           isAnswered: false,
           isRevealed: false,
           isVoided: false,
-          isDoubleOrNothing: idx === luckyIndex
+          // Preserve if exists, else assign to lucky index
+          isDoubleOrNothing: hasDouble ? (q.isDoubleOrNothing || false) : (idx === luckyIndex)
         }))
       };
     });

@@ -52,18 +52,23 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
       return;
     }
 
-    const newCats: Category[] = Array.from({ length: config.catCount }).map((_, cI) => ({
-      id: Math.random().toString(),
-      title: `Category ${cI + 1}`,
-      questions: Array.from({ length: config.rowCount }).map((_, qI) => ({
+    const newCats: Category[] = Array.from({ length: config.catCount }).map((_, cI) => {
+      // Randomly assign Double Or Nothing
+      const luckyIndex = Math.floor(Math.random() * config.rowCount);
+      return {
         id: Math.random().toString(),
-        text: 'Enter question text...',
-        answer: 'Enter answer...',
-        points: (qI + 1) * 100,
-        isRevealed: false,
-        isAnswered: false
-      }))
-    }));
+        title: `Category ${cI + 1}`,
+        questions: Array.from({ length: config.rowCount }).map((_, qI) => ({
+          id: Math.random().toString(),
+          text: 'Enter question text...',
+          answer: 'Enter answer...',
+          points: (qI + 1) * 100,
+          isRevealed: false,
+          isAnswered: false,
+          isDoubleOrNothing: qI === luckyIndex
+        }))
+      };
+    });
     setCategories(newCats);
     setStep('BUILDER');
   };
@@ -72,25 +77,36 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
 
   const handleSave = () => {
     try {
+      // Enforce: Each category must have exactly one Double Or Nothing
+      // If none found (e.g. manual edit interference), assign one randomly.
+      const validatedCategories = categories.map(cat => {
+        if (cat.questions.some(q => q.isDoubleOrNothing)) return cat;
+        const lucky = Math.floor(Math.random() * cat.questions.length);
+        return {
+          ...cat,
+          questions: cat.questions.map((q, i) => ({...q, isDoubleOrNothing: i === lucky}))
+        };
+      });
+
       if (initialTemplate) {
         dataService.updateTemplate({
           ...initialTemplate,
           topic: config.title,
-          categories,
+          categories: validatedCategories,
           config: {
             playerCount: playerNames.length,
             playerNames: playerNames,
-            categoryCount: categories.length,
-            rowCount: categories[0]?.questions.length || config.rowCount
+            categoryCount: validatedCategories.length,
+            rowCount: validatedCategories[0]?.questions.length || config.rowCount
           }
         });
       } else {
         dataService.createTemplate(showId, config.title, {
           playerCount: playerNames.length,
           playerNames: playerNames,
-          categoryCount: categories.length,
-          rowCount: categories[0]?.questions.length || config.rowCount
-        }, categories);
+          categoryCount: validatedCategories.length,
+          rowCount: validatedCategories[0]?.questions.length || config.rowCount
+        }, validatedCategories);
       }
       addToast('success', 'Template saved successfully.');
       onSave();
@@ -257,13 +273,12 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                     title: `Category ${cI + 1}`,
                     questions: Array.from({ length: config.rowCount }).map((_, qI) => ({
                       id: Math.random().toString(),
-                      text: '', answer: '', points: (qI + 1) * 100, isRevealed: false, isAnswered: false
+                      text: '', answer: '', points: (qI + 1) * 100, isRevealed: false, isAnswered: false, isDoubleOrNothing: false
                     }))
                   }));
                   setCategories(newCats);
                   setStep('BUILDER');
-                  // Trigger generation after render/state update logic handled (simulated by just calling fill immediately on local var or state if async)
-                  // Actually, better to just call logic here and set state once.
+                  // Trigger generation
                   setIsAiLoading(true);
                   generateTriviaGame(prompt, diff, config.catCount, config.rowCount).then(generated => {
                       setCategories(generated);
@@ -340,7 +355,8 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                   onClick={() => setEditCell({cIdx, qIdx})}
                   className="bg-zinc-900 border border-zinc-800 hover:border-gold-500 text-gold-400 font-serif font-bold text-2xl flex-1 flex flex-col items-center justify-center rounded cursor-pointer relative group transition-all"
                 >
-                  <span>{q.points}</span>
+                  <span className={q.isDoubleOrNothing ? 'text-red-500' : ''}>{q.points}</span>
+                  {q.isDoubleOrNothing && <div className="absolute top-1 right-1 text-[8px] bg-red-900 text-white px-1 rounded">2X</div>}
                   {(q.text !== 'Enter question text...') && (
                     <div className="absolute bottom-2 right-2 w-2 h-2 bg-green-500 rounded-full" title="Has Content" />
                   )}
@@ -379,6 +395,22 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                      defaultValue={q.answer}
                      className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-16 focus:border-gold-500 outline-none"
                    />
+                 </div>
+                 <div className="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      id="edit-q-double" 
+                      defaultChecked={q.isDoubleOrNothing}
+                      onChange={(e) => {
+                         // Manually toggling double means we might have 2 or 0 in category. 
+                         // handleSave will fix 0, but 2 is allowed if manual.
+                         const newCats = [...categories];
+                         newCats[cIdx].questions[qIdx].isDoubleOrNothing = e.target.checked;
+                         setCategories(newCats);
+                      }}
+                      className="accent-gold-600 w-4 h-4"
+                    />
+                    <label htmlFor="edit-q-double" className="text-xs text-red-500 font-bold uppercase">Force Double Or Nothing</label>
                  </div>
                </div>
 

@@ -109,7 +109,7 @@ export const QuestionModal: React.FC<Props> = ({
         {/* HEADER */}
         <div className="flex-none bg-gold-600 p-3 flex justify-between items-center text-black">
           <h3 className="font-black uppercase tracking-widest text-lg md:text-xl">
-            {categoryTitle} // {isDouble ? <span className="animate-pulse font-serif">2x POINTS</span> : <span>{question.points} PTS</span>}
+            {categoryTitle} // {isDouble ? <span className="animate-pulse font-serif text-red-900">DOUBLE</span> : <span>{question.points} PTS</span>}
           </h3>
           <div className="flex items-center gap-2 text-xs font-bold uppercase">
             {activePlayer ? <span>Active: {activePlayer.name}</span> : <span>No Player Selected</span>}
@@ -121,15 +121,15 @@ export const QuestionModal: React.FC<Props> = ({
           
           {/* Double Or Nothing Banner */}
           {isDouble && (
-            <div className="absolute top-8 left-0 right-0 flex justify-center animate-in slide-in-from-top duration-700">
-              <div className="bg-gradient-to-r from-transparent via-red-600 to-transparent px-12 py-2 text-white font-black tracking-[0.3em] text-xl md:text-3xl uppercase shadow-[0_0_30px_rgba(220,38,38,0.6)]">
-                Double Or Nothing
-              </div>
+            <div className="absolute top-0 left-0 right-0 flex justify-center py-4 z-20 animate-in slide-in-from-top duration-500">
+              <h1 className="text-red-600 font-black text-3xl md:text-5xl uppercase tracking-widest drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] stroke-black" style={{ textShadow: '0 0 20px rgba(220, 38, 38, 0.5)' }}>
+                DOUBLE OR NOTHING
+              </h1>
             </div>
           )}
 
           {/* Question Text */}
-          <h2 className={`font-serif text-3xl md:text-5xl lg:text-6xl text-white leading-tight mb-16 transition-all duration-500 ${isRevealed ? 'scale-75 opacity-60' : 'scale-100'}`}>
+          <h2 className={`font-serif text-3xl md:text-5xl lg:text-6xl text-white leading-tight mb-16 transition-all duration-500 ${isRevealed ? 'scale-75 opacity-60' : 'scale-100'} ${isDouble ? 'mt-12' : ''}`}>
             {question.text}
           </h2>
 
