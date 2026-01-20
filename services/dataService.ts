@@ -1,3 +1,4 @@
+
 import { Show, GameTemplate, Category, TemplateConfig } from '../types';
 import { logger } from './logger';
 
@@ -30,6 +31,11 @@ class DataService {
     return allShows.filter(s => s.userId === username).sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
+  }
+
+  getShowById(id: string): Show | undefined {
+    const allShows = this.getShowsDB();
+    return allShows.find(s => s.id === id);
   }
 
   createShow(username: string, title: string): Show {

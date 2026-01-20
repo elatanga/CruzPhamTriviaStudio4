@@ -74,7 +74,7 @@ describe('App Robustness', () => {
     const req = await authService.submitTokenRequest({
       firstName: 'Jane',
       lastName: 'Doe',
-      phone: '123',
+      phoneE164: '123',
       tiktokHandle: 'janed',
       preferredUsername: 'jane_prod'
     });

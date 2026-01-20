@@ -6,6 +6,7 @@ const STORAGE_KEYS = {
   SESSIONS: 'cruzpham_db_sessions',
   REQUESTS: 'cruzpham_db_requests',
   AUDIT: 'cruzpham_db_audit_logs',
+  BOOTSTRAP: 'cruzpham_sys_bootstrap',
 };
 
 // Rate Limiting Map: ActorID -> timestamps[]
@@ -27,11 +28,11 @@ async function hashToken(token: string): Promise<string> {
 
 async function simulateEmailProvider(to: string, subject: string, body: string): Promise<{ success: boolean; id?: string; error?: string }> {
   // Simulate SendGrid/Mailgun
-  logger.info(`[SendGrid] Dispatching to ${to}`, { subject }); 
+  logger.info(`[EmailProvider] Dispatching to ${to}`, { subject }); 
   await new Promise(r => setTimeout(r, 800)); // Network latency
   
   if (Math.random() < 0.1) {
-    logger.error(`[SendGrid] Failed to send to ${to}`);
+    logger.error(`[EmailProvider] Failed to send to ${to}`);
     return { success: false, error: 'Provider Internal Error (Simulated)' };
   }
   return { success: true, id: `sg_${Math.random().toString(36).substr(2, 12)}` };
@@ -39,11 +40,11 @@ async function simulateEmailProvider(to: string, subject: string, body: string):
 
 async function simulateSmsProvider(to: string, message: string): Promise<{ success: boolean; id?: string; error?: string }> {
   // Simulate Twilio
-  logger.info(`[Twilio] Dispatching to ${to}`); 
+  logger.info(`[SmsProvider] Dispatching to ${to}`); 
   await new Promise(r => setTimeout(r, 800));
   
   if (Math.random() < 0.1) {
-    logger.error(`[Twilio] Failed to send to ${to}`);
+    logger.error(`[SmsProvider] Failed to send to ${to}`);
     return { success: false, error: 'Carrier Blocked (Simulated)' };
   }
   return { success: true, id: `sm_${Math.random().toString(36).substr(2, 12)}` };
@@ -84,7 +85,11 @@ class AuthService {
     localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions));
   }
   getRequests(): TokenRequest[] {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.REQUESTS) || '[]'); } catch { return []; }
+    try { 
+      const reqs = JSON.parse(localStorage.getItem(STORAGE_KEYS.REQUESTS) || '[]'); 
+      // Ensure sorting by createdAt desc
+      return reqs.sort((a: TokenRequest, b: TokenRequest) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } catch { return []; }
   }
   private saveRequests(reqs: TokenRequest[]) {
     localStorage.setItem(STORAGE_KEYS.REQUESTS, JSON.stringify(reqs));
@@ -116,15 +121,36 @@ class AuthService {
     logger.info(`[Audit] ${action}: ${details}`, { ...metadata, actorId, targetId });
   }
 
-  // --- BOOTSTRAP ---
+  // --- BOOTSTRAP SYSTEM ---
 
-  isConfigured(): boolean {
-    const users = this.getUsers();
-    return users.some(u => u.role === 'MASTER_ADMIN');
+  async getBootstrapStatus(): Promise<{ masterReady: boolean }> {
+    logger.info('bootstrapStatusCheck');
+    // Simulate network latency for server check
+    await new Promise(r => setTimeout(r, 150));
+    
+    const raw = localStorage.getItem(STORAGE_KEYS.BOOTSTRAP);
+    if (!raw) return { masterReady: false };
+    
+    try {
+      const doc = JSON.parse(raw);
+      return { masterReady: !!doc.masterReady };
+    } catch {
+      return { masterReady: false };
+    }
   }
 
   async bootstrapMasterAdmin(username: string): Promise<string> {
-    if (this.isConfigured()) throw new AppError('ERR_FORBIDDEN', 'System already configured', logger.getCorrelationId());
+    logger.info('bootstrapAttempt', { username });
+
+    const currentStatus = await this.getBootstrapStatus();
+    if (currentStatus.masterReady) {
+      logger.warn('bootstrapBlockedAlreadyComplete');
+      throw new AppError('ERR_BOOTSTRAP_COMPLETE', 'System already bootstrapped', logger.getCorrelationId());
+    }
+
+    if (localStorage.getItem(STORAGE_KEYS.BOOTSTRAP)) {
+      throw new AppError('ERR_BOOTSTRAP_COMPLETE', 'System already bootstrapped', logger.getCorrelationId());
+    }
     
     const rawToken = 'mk-' + crypto.randomUUID().replace(/-/g, '');
     const hash = await hashToken(rawToken);
@@ -146,7 +172,16 @@ class AuthService {
     };
 
     this.saveUsers([master]);
+    
+    const bootstrapDoc = {
+      masterReady: true,
+      createdAt: new Date().toISOString(),
+      masterAdminId: master.id
+    };
+    localStorage.setItem(STORAGE_KEYS.BOOTSTRAP, JSON.stringify(bootstrapDoc));
+
     await this.logAction('SYSTEM', 'BOOTSTRAP', 'Master Admin created');
+    logger.info('bootstrapSuccess');
     
     return rawToken;
   }
@@ -177,7 +212,6 @@ class AuthService {
       return { success: false, message: 'Access token expired.', code: 'ERR_SESSION_EXPIRED' };
     }
 
-    // Invalidate old sessions
     const allSessions = this.getSessions();
     Object.keys(allSessions).forEach(key => {
       if (allSessions[key].username === targetUser.username) delete allSessions[key];
@@ -208,14 +242,34 @@ class AuthService {
   }
 
   async restoreSession(sessionId: string): Promise<AuthResponse> {
+    logger.info('restoreAttempt', { sessionId });
+    
+    const bsStatus = await this.getBootstrapStatus();
+    if (!bsStatus.masterReady) {
+      logger.warn('restoreFail - System not bootstrapped');
+      return { success: false, code: 'ERR_UNKNOWN' };
+    }
+
     const sessions = this.getSessions();
     const session = sessions[sessionId];
-    if (!session) return { success: false, message: 'Session expired', code: 'ERR_SESSION_EXPIRED' };
+    if (!session) {
+      logger.warn('restoreFail - Session not found', { sessionId });
+      return { success: false, message: 'Session expired', code: 'ERR_SESSION_EXPIRED' };
+    }
     
     const users = this.getUsers();
     const user = users.find(u => u.username === session.username);
-    if (!user || user.status === 'REVOKED') return { success: false, message: 'User invalid', code: 'ERR_INVALID_CREDENTIALS' };
+    if (!user) {
+      logger.warn('restoreFail - User missing', { username: session.username });
+      return { success: false, message: 'User invalid', code: 'ERR_INVALID_CREDENTIALS' };
+    }
 
+    if (user.status === 'REVOKED') {
+      logger.warn('restoreFail - User revoked', { username: session.username });
+      return { success: false, message: 'Access revoked', code: 'ERR_FORBIDDEN' };
+    }
+
+    logger.info('restoreSuccess', { username: session.username });
     return { success: true, session };
   }
 
@@ -256,7 +310,6 @@ class AuthService {
       email: userData.email,
       phone: userData.phone,
       
-      // Full Profile Persistence
       profile: {
         firstName: userData.profile?.firstName,
         lastName: userData.profile?.lastName,
@@ -290,7 +343,6 @@ class AuthService {
     if (targetIdx === -1) throw new AppError('ERR_UNKNOWN', 'User not found', logger.getCorrelationId());
     const target = users[targetIdx];
 
-    // Permission Check
     if (target.role === 'MASTER_ADMIN' && actor?.role !== 'MASTER_ADMIN') {
       throw new AppError('ERR_FORBIDDEN', 'Cannot modify Master Admin', logger.getCorrelationId());
     }
@@ -298,12 +350,9 @@ class AuthService {
     const rawToken = (target.role === 'ADMIN' ? 'ak-' : 'pk-') + crypto.randomUUID().replace(/-/g, '').substr(0, 16);
     const hash = await hashToken(rawToken);
 
-    // Rotate Token
     target.tokenHash = hash;
     target.updatedAt = new Date().toISOString();
     
-    // Revoke old sessions implicitly by changing token hash logic in login/session check
-    // but explicit session flush is safer:
     const sessions = this.getSessions();
     Object.keys(sessions).forEach(k => {
       if (sessions[k].username === targetUsername) delete sessions[k];
@@ -333,7 +382,6 @@ class AuthService {
     target.updatedAt = new Date().toISOString();
     
     if (revoke) {
-      // Kill sessions
       const sessions = this.getSessions();
       Object.keys(sessions).forEach(k => {
         if (sessions[k].username === targetUsername) delete sessions[k];
@@ -362,7 +410,6 @@ class AuthService {
     users = users.filter(u => u.username !== targetUsername);
     this.saveUsers(users);
     
-    // Cleanup sessions
     const sessions = this.getSessions();
     Object.keys(sessions).forEach(k => {
       if (sessions[k].username === targetUsername) delete sessions[k];
@@ -393,7 +440,6 @@ class AuthService {
       result = await simulateSmsProvider(target.phone, content);
     }
 
-    // Update Delivery Log
     const log: DeliveryLog = {
       id: crypto.randomUUID(),
       method,
@@ -414,21 +460,79 @@ class AuthService {
     return log;
   }
 
-  // --- REQUEST MANAGEMENT ---
+  // --- REQUEST MANAGEMENT (PERSISTENT FIRST) ---
   
-  async submitTokenRequest(data: Omit<TokenRequest, 'id' | 'status' | 'timestamp' | 'emailDeliveryStatus' | 'smsDeliveryStatus'>): Promise<TokenRequest> {
+  async submitTokenRequest(data: Omit<TokenRequest, 'id' | 'status' | 'createdAt' | 'updatedAt' | 'adminNotifyStatus' | 'userNotifyStatus' | 'adminNotifyError'>): Promise<TokenRequest> {
+    const timestamp = new Date().toISOString();
+    
+    // 1. Persist IMMEDIATELY to 'DB' (localStorage)
     const newRequest: TokenRequest = {
       id: crypto.randomUUID().split('-')[0].toUpperCase(),
       ...data,
       status: 'PENDING',
-      timestamp: new Date().toISOString(),
-      emailDeliveryStatus: 'PENDING',
-      smsDeliveryStatus: 'PENDING'
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      adminNotifyStatus: 'PENDING',
+      userNotifyStatus: 'PENDING'
     };
+    
+    logger.info('requestCreateAttempt', { reqId: newRequest.id });
+
     const requests = this.getRequests();
     requests.unshift(newRequest);
     this.saveRequests(requests);
+
+    await this.logAction('SYSTEM', 'REQUEST_SUBMITTED', `New request from ${data.firstName}`, null, newRequest.id);
+
+    // 2. Trigger Async Email Notification (Fire & Forget from client perspective, but tracked in status)
+    this.notifyAdmins(newRequest.id).catch(err => {
+        logger.error('Background notifyAdmins failed', err);
+    });
+
     return newRequest;
+  }
+
+  async notifyAdmins(reqId: string) {
+    logger.info('notifyAdminsAttempt', { reqId });
+    
+    // Refresh state from DB
+    const requests = this.getRequests();
+    const idx = requests.findIndex(r => r.id === reqId);
+    if (idx === -1) return;
+
+    const req = requests[idx];
+    const recipients = ['cruzphamnetwork@gmail.com', 'eldecoder@gmail.com'];
+    
+    try {
+        // Simulate SendGrid Batch Send
+        const subject = `[ACTION REQUIRED] New Token Request: ${req.preferredUsername}`;
+        const body = `User: ${req.firstName} ${req.lastName}\nTikTok: ${req.tiktokHandle}\nPhone: ${req.phoneE164}\n\nPlease review in Admin Console.`;
+        
+        let successCount = 0;
+        for (const email of recipients) {
+            const res = await simulateEmailProvider(email, subject, body);
+            if (res.success) successCount++;
+        }
+
+        if (successCount > 0) {
+            req.adminNotifyStatus = 'SENT';
+            req.adminNotifyError = undefined;
+            await this.logAction('SYSTEM', 'ADMIN_NOTIFIED', `Admins notified for ${reqId}`);
+        } else {
+             throw new Error("All provider attempts failed");
+        }
+    } catch (e: any) {
+        req.adminNotifyStatus = 'FAILED';
+        req.adminNotifyError = e.message || "Provider Error";
+        logger.error('notifyAdminsFail', { error: e });
+    }
+
+    requests[idx] = req;
+    this.saveRequests(requests);
+  }
+
+  async retryAdminNotification(reqId: string) {
+      return this.notifyAdmins(reqId);
   }
 
   async approveRequest(actorUsername: string, reqId: string, durationMinutes?: number, notifyMethods: ('EMAIL'|'SMS')[] = []): Promise<string> {
@@ -440,7 +544,7 @@ class AuthService {
     const rawToken = await this.createUser(actorUsername, {
       username: req.preferredUsername,
       email: `user_${reqId}@example.com`, // Simulated or req.email if available
-      phone: req.phone,
+      phone: req.phoneE164,
       profile: {
         firstName: req.firstName,
         lastName: req.lastName,
@@ -451,24 +555,34 @@ class AuthService {
     }, 'PRODUCER', durationMinutes);
 
     req.status = 'APPROVED';
-    requests[reqIndex] = req;
-    this.saveRequests(requests);
-
+    req.updatedAt = new Date().toISOString();
+    
+    // User Notification Logic
     const message = `Welcome to CruzPham Studios! Your access token is: ${rawToken}`;
     const users = this.getUsers(); // Reload to get newly created user
     const newUser = users.find(u => u.username === req.preferredUsername);
+    
+    let notifySuccess = false;
 
     if (newUser) {
       if (notifyMethods.includes('EMAIL')) {
-        try { await this.sendMessage(actorUsername, newUser.username, 'EMAIL', message); req.emailDeliveryStatus = 'SENT'; } 
-        catch { req.emailDeliveryStatus = 'FAILED'; }
+        try { 
+            await this.sendMessage(actorUsername, newUser.username, 'EMAIL', message); 
+            notifySuccess = true;
+        } 
+        catch (e) { logger.warn('Approval email failed', e); }
       }
       if (notifyMethods.includes('SMS')) {
-        try { await this.sendMessage(actorUsername, newUser.username, 'SMS', message); req.smsDeliveryStatus = 'SENT'; } 
-        catch { req.smsDeliveryStatus = 'FAILED'; }
+        try { 
+            await this.sendMessage(actorUsername, newUser.username, 'SMS', message); 
+            notifySuccess = true;
+        } 
+        catch (e) { logger.warn('Approval SMS failed', e); }
       }
     }
     
+    req.userNotifyStatus = notifySuccess ? 'SENT' : 'FAILED';
+    requests[reqIndex] = req;
     this.saveRequests(requests);
     await this.logAction(actorUsername, 'REQUEST_APPROVED', `Approved request ${reqId}`, null, newUser?.username);
 
@@ -480,6 +594,7 @@ class AuthService {
     const req = requests.find(r => r.id === reqId);
     if (req) {
       req.status = 'REJECTED';
+      req.updatedAt = new Date().toISOString();
       this.saveRequests(requests);
       await this.logAction(actor, 'REQUEST_REJECTED', `Rejected request ${reqId}`);
     }

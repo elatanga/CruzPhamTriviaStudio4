@@ -1,10 +1,12 @@
+
 import React, { useState } from 'react';
 import { Lock, ArrowRight, Loader2, Key } from 'lucide-react';
 import { authService } from '../services/authService';
 import { TokenRequestModal } from './TokenRequestModal';
+import { Session } from '../types';
 
 interface Props {
-  onLoginSuccess: (username: string) => void;
+  onLoginSuccess: (session: Session) => void;
   addToast: (type: any, msg: string) => void;
 }
 
@@ -22,7 +24,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess, addToast }) => {
     try {
       const result = await authService.login(username, token);
       if (result.success && result.session) {
-        onLoginSuccess(result.session.username);
+        onLoginSuccess(result.session);
         // Toast is handled by parent or we can do it here
       } else {
         addToast('error', result.message || 'Login failed');

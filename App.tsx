@@ -12,17 +12,20 @@ import { ShortcutsPanel } from './components/ShortcutsPanel';
 import { DirectorPanel } from './components/DirectorPanel';
 import { AdminPanel } from './components/AdminPanel';
 import { authService } from './services/authService';
-import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole } from './types';
+import { dataService } from './services/dataService';
+import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session } from './types';
 import { soundService } from './services/soundService';
 import { logger } from './services/logger';
-import { Monitor, Grid, Shield, Copy } from 'lucide-react';
+import { Monitor, Grid, Shield, Copy, Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
+  // App Boot State
   const [isConfigured, setIsConfigured] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false); // Controls rendering of main UI vs Loader
+  
   const [bootstrapToken, setBootstrapToken] = useState<string | null>(null);
 
   const [session, setSession] = useState<{ id: string; username: string; role: UserRole } | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
   const [activeShow, setActiveShow] = useState<Show | null>(null);
 
   // --- VIEW STATE ---
@@ -61,6 +64,17 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // UI State Persistence Effect
+  useEffect(() => {
+    if (session) {
+      const uiState = {
+        activeShowId: activeShow?.id || null,
+        viewMode: viewMode
+      };
+      localStorage.setItem('cruzpham_ui_state', JSON.stringify(uiState));
+    }
+  }, [activeShow, viewMode, session]);
+
   useEffect(() => {
     // Check if I am a popout
     const urlParams = new URLSearchParams(window.location.search);
@@ -73,42 +87,74 @@ const App: React.FC = () => {
     // Sync Listener
     window.addEventListener('storage', handleStorageChange);
 
-    // Bootstrap Check
-    const configured = authService.isConfigured();
-    setIsConfigured(configured);
+    // SYSTEM STARTUP GATE & HYDRATION
+    const initializeApp = async () => {
+       try {
+         // Secure Check: Server Truth
+         const status = await authService.getBootstrapStatus();
+         setIsConfigured(status.masterReady);
 
-    if (configured) {
-       // Restore Auth
-      const restoreAuth = async () => {
-        const sessions = JSON.parse(localStorage.getItem('cruzpham_db_sessions') || '{}');
-        const sessionIds = Object.keys(sessions);
-        if (sessionIds.length > 0) {
-          const lastId = sessionIds[sessionIds.length - 1]; 
-          const result = await authService.restoreSession(lastId);
-          if (result.success && result.session) {
-            setSession({ id: result.session.id, username: result.session.username, role: result.session.role });
-          }
-        }
-        setAuthChecked(true);
-      };
-      restoreAuth();
-    } else {
-      setAuthChecked(true);
-    }
-    
-    // Restore Game State
-    const savedState = localStorage.getItem('cruzpham_gamestate');
-    if (savedState) {
-      try {
-        const parsed = JSON.parse(savedState);
-        setGameState(parsed);
-        if (parsed.showTitle && !activeShow) {
-           setActiveShow({ id: 'restored', userId: 'restored', title: parsed.showTitle, createdAt: '' });
-        }
-      } catch (e) {
-        console.error('Failed to restore game state', e);
-      }
-    }
+         if (status.masterReady) {
+            // Restore Persistent Session
+            const storedSessionId = localStorage.getItem('cruzpham_active_session_id');
+            if (storedSessionId) {
+               logger.info('hydrateSessionAttempt', { storedSessionId });
+               const result = await authService.restoreSession(storedSessionId);
+               
+               if (result.success && result.session) {
+                  setSession({ 
+                    id: result.session.id, 
+                    username: result.session.username, 
+                    role: result.session.role 
+                  });
+                  logger.info('hydrateSessionSuccess');
+
+                  // Restore UI State
+                  try {
+                    const uiStateRaw = localStorage.getItem('cruzpham_ui_state');
+                    if (uiStateRaw) {
+                      const uiState = JSON.parse(uiStateRaw);
+                      if (uiState.activeShowId) {
+                        const restoredShow = dataService.getShowById(uiState.activeShowId);
+                        if (restoredShow) {
+                          setActiveShow(restoredShow);
+                          logger.info('hydrateActiveShow', { showId: restoredShow.id });
+                        }
+                      }
+                      if (uiState.viewMode) {
+                        setViewMode(uiState.viewMode);
+                        logger.info('hydrateViewMode', { mode: uiState.viewMode });
+                      }
+                    }
+                  } catch (e) {
+                    logger.warn('hydrateUIStateFailed');
+                  }
+               } else {
+                 // Invalid session (revoked or expired), clear artifacts
+                 localStorage.removeItem('cruzpham_active_session_id');
+                 localStorage.removeItem('cruzpham_ui_state');
+               }
+            }
+         }
+         
+         // Restore Game State (Always load "Live" state if exists, acts as source of truth for game)
+         const savedState = localStorage.getItem('cruzpham_gamestate');
+         if (savedState) {
+           const parsed = JSON.parse(savedState);
+           setGameState(parsed);
+           // Fallback: If no show active but game has title, create ghost active show for UI consistency
+           if (parsed.showTitle && !activeShow) {
+              setActiveShow(prev => prev || { id: 'restored-ghost', userId: 'restored', title: parsed.showTitle, createdAt: '' });
+           }
+         }
+       } catch (e) {
+         console.error("System Initialization Failed", e);
+       } finally {
+         setAuthChecked(true); // Allow render
+       }
+    };
+
+    initializeApp();
 
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
@@ -122,9 +168,18 @@ const App: React.FC = () => {
 
   const handleBootstrap = async (e: React.FormEvent) => {
     e.preventDefault();
-    const token = await authService.bootstrapMasterAdmin('admin');
-    setBootstrapToken(token);
-    setIsConfigured(true);
+    try {
+      const token = await authService.bootstrapMasterAdmin('admin');
+      setBootstrapToken(token);
+      setIsConfigured(true);
+      addToast('success', 'Master Admin Created Successfully');
+    } catch (e: any) {
+      addToast('error', e.message);
+      // If error is "already complete", refresh state to kick user out of bootstrap UI
+      if (e.code === 'ERR_BOOTSTRAP_COMPLETE') {
+         setTimeout(() => window.location.reload(), 2000);
+      }
+    }
   };
 
   const handlePopout = () => {
@@ -151,6 +206,24 @@ const App: React.FC = () => {
   const handleBringBack = () => {
     setIsDirectorPoppedOut(false);
     logger.info('popoutClosed');
+  };
+
+  const handleLoginSuccess = (newSession: Session) => {
+    setSession({ id: newSession.id, username: newSession.username, role: newSession.role });
+    localStorage.setItem('cruzpham_active_session_id', newSession.id);
+    addToast('success', 'Welcome back.');
+  };
+
+  const handleLogout = () => {
+    if (session) {
+      authService.logout(session.id);
+      setSession(null);
+      setActiveShow(null);
+      localStorage.removeItem('cruzpham_active_session_id');
+      localStorage.removeItem('cruzpham_ui_state');
+      localStorage.removeItem('cruzpham_gamestate');
+      setViewMode('BOARD');
+    }
   };
 
   // --- GAME LOGIC ---
@@ -299,16 +372,29 @@ const App: React.FC = () => {
   };
 
   // --- RENDER ---
-  if (!authChecked) return null;
+  
+  // 1. Initial Loading Gate
+  if (!authChecked) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-black text-white">
+        <div className="flex flex-col items-center gap-4">
+           <Loader2 className="w-12 h-12 text-gold-500 animate-spin" />
+           <p className="text-zinc-500 text-sm uppercase tracking-widest font-bold">Initializing Studio...</p>
+        </div>
+      </div>
+    );
+  }
 
-  // BOOTSTRAP VIEW
+  // 2. BOOTSTRAP VIEW (Only if not configured)
   if (!isConfigured) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-black text-white">
-        <div className="max-w-md w-full p-8 border border-gold-600 rounded-2xl bg-zinc-900 text-center">
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
+        <div className="max-w-md w-full p-8 border border-gold-600 rounded-2xl bg-zinc-900 text-center relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent animate-pulse" />
           <h1 className="text-3xl font-serif text-gold-500 mb-4">SYSTEM BOOTSTRAP</h1>
-          <p className="text-zinc-400 mb-8">No Master Admin detected. Initialize the system to begin.</p>
-          <button onClick={handleBootstrap} className="w-full bg-gold-600 text-black font-bold py-3 rounded uppercase tracking-wider hover:bg-gold-500">
+          <p className="text-zinc-400 mb-8">No Master Admin detected.<br/>Initialize the system to begin.</p>
+          <button onClick={handleBootstrap} className="w-full bg-gold-600 text-black font-bold py-3 rounded uppercase tracking-wider hover:bg-gold-500 transition-all">
             Create Master Admin
           </button>
         </div>
@@ -316,7 +402,7 @@ const App: React.FC = () => {
     );
   }
 
-  // BOOTSTRAP SUCCESS (Show Token Once)
+  // 3. BOOTSTRAP SUCCESS (Show Token Once)
   if (bootstrapToken) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-black text-white">
@@ -335,7 +421,7 @@ const App: React.FC = () => {
     );
   }
 
-  // Popout Mode
+  // 4. Popout Mode
   if (isPopoutView) {
     if (!session) return <div className="p-8 text-center text-white">Authentication required.</div>;
     return (
@@ -351,27 +437,18 @@ const App: React.FC = () => {
   const isAdmin = session?.role === 'ADMIN' || session?.role === 'MASTER_ADMIN';
   const showShortcuts = viewMode === 'BOARD' && gameState.isGameStarted;
 
+  // 5. MAIN APP
   return (
     <AppShell 
       activeShowTitle={gameState.showTitle || (activeShow ? activeShow.title : undefined)}
       username={session?.username}
-      onLogout={() => {
-        authService.logout(session!.id);
-        setSession(null);
-        setActiveShow(null);
-        localStorage.removeItem('cruzpham_gamestate');
-        setViewMode('BOARD');
-      }}
+      onLogout={handleLogout}
       shortcuts={showShortcuts ? <ShortcutsPanel /> : null}
     >
       <ToastContainer toasts={toasts} removeToast={removeToast} />
       
       {!session ? (
-        <LoginScreen onLoginSuccess={(u) => {
-          const sessions = JSON.parse(localStorage.getItem('cruzpham_db_sessions') || '{}');
-          const sess = Object.values(sessions).find((s: any) => s.username === u) as any;
-          if (sess) setSession({ id: sess.id, username: sess.username, role: sess.role });
-        }} addToast={addToast} />
+        <LoginScreen onLoginSuccess={handleLoginSuccess} addToast={addToast} />
       ) : (
         <>
           {/* Main App Content */}

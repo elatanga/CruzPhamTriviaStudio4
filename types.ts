@@ -68,7 +68,8 @@ export type ErrorCode =
   | 'ERR_AI_GENERATION'
   | 'ERR_LIMIT_REACHED'
   | 'ERR_UNKNOWN'
-  | 'ERR_SESSION_EXPIRED';
+  | 'ERR_SESSION_EXPIRED'
+  | 'ERR_BOOTSTRAP_COMPLETE';
 
 export class AppError extends Error {
   public code: ErrorCode;
@@ -144,12 +145,18 @@ export interface TokenRequest {
   lastName: string;
   tiktokHandle: string;
   preferredUsername: string;
-  phone: string;
+  phoneE164: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  timestamp: string;
-  emailDeliveryStatus: 'SENT' | 'FAILED' | 'PENDING';
-  smsDeliveryStatus: 'SENT' | 'FAILED' | 'PENDING';
-  lastError?: string;
+  
+  createdAt: string; // Server Timestamp
+  updatedAt: string;
+
+  // Admin Notification (New Request Alert)
+  adminNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
+  adminNotifyError?: string;
+
+  // User Notification (Approval/Rejection)
+  userNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
 }
 
 export interface AuthResponse {
@@ -174,7 +181,9 @@ export type AuditAction =
   | 'MESSAGE_SENT_EMAIL' 
   | 'MESSAGE_SENT_SMS'
   | 'REQUEST_APPROVED'
-  | 'REQUEST_REJECTED';
+  | 'REQUEST_REJECTED'
+  | 'REQUEST_SUBMITTED'
+  | 'ADMIN_NOTIFIED';
 
 export interface AuditLogEntry {
   id: string;

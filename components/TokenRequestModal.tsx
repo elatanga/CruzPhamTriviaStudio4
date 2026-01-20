@@ -45,7 +45,7 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
         lastName: formData.lastName,
         tiktokHandle: formData.tiktok,
         preferredUsername: formData.username,
-        phone: normalizePhone(formData.phone)
+        phoneE164: normalizePhone(formData.phone)
       });
       setReqId(result.id);
       setStep('SUCCESS');
