@@ -1,0 +1,159 @@
+export interface Question {
+  id: string;
+  text: string;
+  points: number;
+  answer: string;
+  isRevealed: boolean;
+  isAnswered: boolean;
+  isVoided?: boolean;
+  isDoubleOrNothing?: boolean;
+}
+
+export interface Category {
+  id: string;
+  title: string;
+  questions: Question[];
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  score: number;
+  color: string;
+}
+
+export interface GameState {
+  showTitle: string;
+  isGameStarted: boolean;
+  categories: Category[];
+  players: Player[];
+  activeQuestionId: string | null;
+  activeCategoryId: string | null;
+  selectedPlayerId: string | null;
+  history: string[];
+}
+
+export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
+
+export interface LogEntry {
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+  correlationId: string;
+  data?: any;
+}
+
+export interface ToastMessage {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+}
+
+// --- ERROR HANDLING ---
+
+export type ErrorCode = 
+  | 'ERR_INVALID_CREDENTIALS' 
+  | 'ERR_RATE_LIMIT' 
+  | 'ERR_FORBIDDEN' 
+  | 'ERR_PROVIDER_DOWN'
+  | 'ERR_NETWORK'
+  | 'ERR_AI_GENERATION'
+  | 'ERR_LIMIT_REACHED'
+  | 'ERR_UNKNOWN'
+  | 'ERR_SESSION_EXPIRED';
+
+export class AppError extends Error {
+  public code: ErrorCode;
+  public correlationId: string;
+  
+  constructor(code: ErrorCode, message: string, correlationId?: string) {
+    super(message);
+    this.code = code;
+    this.correlationId = correlationId || 'unknown';
+    this.name = 'AppError';
+  }
+}
+
+// --- AUTHENTICATION & ADMIN TYPES ---
+
+export type UserRole = 'MASTER_ADMIN' | 'ADMIN' | 'PRODUCER';
+
+export interface User {
+  id: string;
+  username: string;
+  tokenHash: string; // SHA-256 hash
+  role: UserRole;
+  email?: string;
+  phone?: string;
+  firstName?: string;
+  lastName?: string;
+  tiktokHandle?: string;
+  createdAt: string;
+  expiresAt?: string | null; // ISO Date or null for permanent
+  createdBy?: string;
+}
+
+export interface Session {
+  id: string;
+  username: string;
+  role: UserRole;
+  createdAt: number;
+  userAgent: string;
+}
+
+export interface TokenRequest {
+  id: string;
+  firstName: string;
+  lastName: string;
+  tiktokHandle: string;
+  preferredUsername: string;
+  phone: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  timestamp: string;
+  emailDeliveryStatus: 'SENT' | 'FAILED' | 'PENDING';
+  smsDeliveryStatus: 'SENT' | 'FAILED' | 'PENDING';
+  lastError?: string;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  session?: Session;
+  message?: string;
+  code?: ErrorCode;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;
+  actorId: string; // Username of admin
+  action: 'BOOTSTRAP' | 'LOGIN' | 'TOKEN_ISSUED' | 'TOKEN_REVOKED' | 'USER_DELETED' | 'ADMIN_CREATED' | 'MESSAGE_SENT' | 'REQUEST_APPROVED';
+  details: string;
+  metadata?: any;
+}
+
+// --- DATA TYPES ---
+
+export interface Show {
+  id: string;
+  userId: string;
+  title: string;
+  createdAt: string;
+}
+
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'mixed';
+
+export interface TemplateConfig {
+  playerCount: number;
+  categoryCount: number;
+  rowCount: number;
+}
+
+export interface GameTemplate {
+  id: string;
+  showId: string;
+  topic: string;
+  config: TemplateConfig;
+  categories: Category[];
+  createdAt: string;
+  lastModified?: string;
+}
