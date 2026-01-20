@@ -26,7 +26,7 @@ const DEST_RATE_LIMIT_MAX = 3; // Max 3 messages per destination per minute
  * Normalizes token for comparison and hashing.
  * Removes spaces, dashes, newlines to ensure "pk-123-456" works as "pk123456".
  */
-function normalizeTokenInput(token: string): string {
+export function normalizeTokenInput(token: string): string {
   if (!token) return '';
   return token.trim().replace(/[\s-]/g, '');
 }
@@ -343,6 +343,8 @@ class AuthService {
     const actor = users.find(u => u.username === actorUsername);
     
     if (!actor) throw new AppError('ERR_FORBIDDEN', 'Actor not found', logger.getCorrelationId());
+    
+    // Security check for role creation
     if (actor.role !== 'MASTER_ADMIN' && role === 'ADMIN') {
       throw new AppError('ERR_FORBIDDEN', 'Only Master Admin can create Admins', logger.getCorrelationId());
     }
@@ -610,13 +612,21 @@ class AuthService {
 
   // APPROVAL WORKFLOW
   async approveRequest(actorUsername: string, reqId: string, customUsername?: string): Promise<{ rawToken: string, user: User }> {
+    const users = this.getUsers();
+    const actor = users.find(u => u.username === actorUsername);
+    
+    // RBAC Security Check
+    if (!actor || (actor.role !== 'ADMIN' && actor.role !== 'MASTER_ADMIN')) {
+      throw new AppError('ERR_FORBIDDEN', 'Insufficient permissions to approve requests', logger.getCorrelationId());
+    }
+
     const requests = this.getRequests();
     const reqIndex = requests.findIndex(r => r.id === reqId);
-    if (reqIndex === -1) throw new AppError('ERR_UNKNOWN', 'Request not found', logger.getCorrelationId());
+    if (reqIndex === -1) throw new AppError('ERR_REQUEST_NOT_FOUND', 'Request not found', logger.getCorrelationId());
     const req = requests[reqIndex];
 
-    if (req.status === 'APPROVED') {
-       throw new AppError('ERR_UNKNOWN', 'Request already approved', logger.getCorrelationId());
+    if (req.status !== 'PENDING') {
+       throw new AppError('ERR_REQUEST_ALREADY_PROCESSED', 'Request is not pending', logger.getCorrelationId());
     }
 
     const finalUsername = customUsername || req.preferredUsername;
@@ -635,8 +645,9 @@ class AuthService {
       }
     }, 'PRODUCER');
 
-    const users = this.getUsers();
-    const newUser = users.find(u => u.username === finalUsername)!;
+    // Reload users after creation
+    const updatedUsers = this.getUsers();
+    const newUser = updatedUsers.find(u => u.username === finalUsername)!;
 
     // 2. Update Request Status & Link
     req.status = 'APPROVED';
@@ -668,15 +679,28 @@ class AuthService {
   }
 
   // REJECTION WORKFLOW
-  async rejectRequest(actor: string, reqId: string) {
+  async rejectRequest(actorUsername: string, reqId: string) {
+    const users = this.getUsers();
+    const actor = users.find(u => u.username === actorUsername);
+    
+    // RBAC Security Check
+    if (!actor || (actor.role !== 'ADMIN' && actor.role !== 'MASTER_ADMIN')) {
+      throw new AppError('ERR_FORBIDDEN', 'Insufficient permissions to reject requests', logger.getCorrelationId());
+    }
+
     const requests = this.getRequests();
     const req = requests.find(r => r.id === reqId);
     if (req) {
+      if (req.status !== 'PENDING') {
+         throw new AppError('ERR_REQUEST_ALREADY_PROCESSED', 'Request is not pending', logger.getCorrelationId());
+      }
       req.status = 'REJECTED';
       req.updatedAt = new Date().toISOString();
       req.rejectedAt = new Date().toISOString();
       this.saveRequests(requests);
-      await this.logAction(actor, 'REQUEST_REJECTED', `Rejected request ${reqId}`);
+      await this.logAction(actorUsername, 'REQUEST_REJECTED', `Rejected request ${reqId}`);
+    } else {
+      throw new AppError('ERR_REQUEST_NOT_FOUND', 'Request not found', logger.getCorrelationId());
     }
   }
 }

@@ -70,7 +70,9 @@ export type ErrorCode =
   | 'ERR_UNKNOWN'
   | 'ERR_SESSION_EXPIRED'
   | 'ERR_BOOTSTRAP_COMPLETE'
-  | 'ERR_VALIDATION';
+  | 'ERR_VALIDATION'
+  | 'ERR_REQUEST_NOT_FOUND'
+  | 'ERR_REQUEST_ALREADY_PROCESSED';
 
 export class AppError extends Error {
   public code: ErrorCode;
