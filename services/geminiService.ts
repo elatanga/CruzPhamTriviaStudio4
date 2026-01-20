@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { Category, Question, Difficulty, AppError } from "../types";
 import { logger } from "./logger";
@@ -58,9 +59,10 @@ export const generateTriviaGame = async (
   topic: string, 
   difficulty: Difficulty,
   numCategories: number = 4,
-  numQuestions: number = 5
+  numQuestions: number = 5,
+  pointScale: number = 100
 ): Promise<Category[]> => {
-  logger.info(`Generating trivia: ${topic} (${numCategories}x${numQuestions}, ${difficulty})`);
+  logger.info(`Generating trivia: ${topic} (${numCategories}x${numQuestions}, ${difficulty}, scale=${pointScale})`);
 
   if (!process.env.API_KEY) throw new AppError('ERR_FORBIDDEN', "Missing API Key", logger.getCorrelationId());
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -88,7 +90,7 @@ export const generateTriviaGame = async (
         const questions: Question[] = (cat.questions || []).map((q: any, qIdx: number) => ({
           id: generateId(),
           text: q.questionText,
-          points: (qIdx + 1) * 100, // Auto-generate points
+          points: (qIdx + 1) * pointScale, // Use point scale
           answer: q.answer,
           isRevealed: false,
           isAnswered: false,
@@ -97,7 +99,7 @@ export const generateTriviaGame = async (
         
         // Robustness: Fill gaps
         while (questions.length < numQuestions) {
-          const nextPoints = (questions.length + 1) * 100;
+          const nextPoints = (questions.length + 1) * pointScale;
           questions.push({
             id: generateId(),
             text: "Placeholder Question",
@@ -128,7 +130,7 @@ export const generateTriviaGame = async (
             id: generateId(),
             text: "Placeholder Question",
             answer: "Placeholder Answer",
-            points: (i+1)*100,
+            points: (i+1)*pointScale,
             isRevealed: false,
             isAnswered: false,
             isDoubleOrNothing: false
@@ -184,7 +186,8 @@ export const generateCategoryQuestions = async (
   topic: string,
   categoryTitle: string,
   count: number,
-  difficulty: Difficulty
+  difficulty: Difficulty,
+  pointScale: number = 100
 ): Promise<Question[]> => {
   if (!process.env.API_KEY) throw new AppError('ERR_FORBIDDEN', "Missing API Key", logger.getCorrelationId());
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -215,7 +218,7 @@ export const generateCategoryQuestions = async (
       id: generateId(),
       text: item.question,
       answer: item.answer,
-      points: (idx + 1) * 100,
+      points: (idx + 1) * pointScale,
       isRevealed: false,
       isAnswered: false,
       isDoubleOrNothing: false

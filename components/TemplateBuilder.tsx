@@ -24,6 +24,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     title: initialTemplate?.topic || '',
     catCount: initialTemplate?.categories.length || 4,
     rowCount: initialTemplate?.config?.rowCount || 5,
+    pointScale: initialTemplate?.config?.pointScale || 100
   });
 
   // Player Names State - Initialize from template or defaults
@@ -65,7 +66,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
           id: Math.random().toString(),
           text: 'Enter question text...',
           answer: 'Enter answer...',
-          points: (qI + 1) * 100,
+          points: (qI + 1) * config.pointScale,
           isRevealed: false,
           isAnswered: false,
           isDoubleOrNothing: qI === luckyIndex
@@ -100,7 +101,8 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
             playerCount: playerNames.length,
             playerNames: playerNames,
             categoryCount: validatedCategories.length,
-            rowCount: validatedCategories[0]?.questions.length || config.rowCount
+            rowCount: validatedCategories[0]?.questions.length || config.rowCount,
+            pointScale: config.pointScale
           }
         });
       } else {
@@ -108,7 +110,8 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
           playerCount: playerNames.length,
           playerNames: playerNames,
           categoryCount: validatedCategories.length,
-          rowCount: validatedCategories[0]?.questions.length || config.rowCount
+          rowCount: validatedCategories[0]?.questions.length || config.rowCount,
+          pointScale: config.pointScale
         }, validatedCategories);
       }
       addToast('success', 'Template saved successfully.');
@@ -123,7 +126,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     soundService.playClick();
     setIsAiLoading(true);
     try {
-      const generatedCats = await generateTriviaGame(prompt, difficulty, categories.length, categories[0].questions.length);
+      const generatedCats = await generateTriviaGame(prompt, difficulty, categories.length, categories[0].questions.length, config.pointScale);
       setCategories(generatedCats);
       setConfig(prev => ({...prev, title: prompt}));
       addToast('success', 'Board populated by AI.');
@@ -140,12 +143,12 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     setIsAiLoading(true);
     try {
       const cat = categories[cIdx];
-      const newQs = await generateCategoryQuestions(config.title, cat.title, cat.questions.length, 'mixed');
+      const newQs = await generateCategoryQuestions(config.title, cat.title, cat.questions.length, 'mixed', config.pointScale);
       
       const newCats = [...categories];
       newCats[cIdx].questions = newQs.map((nq, i) => ({
         ...nq,
-        points: (i + 1) * 100,
+        points: (i + 1) * config.pointScale,
         id: cat.questions[i]?.id || nq.id 
       }));
       setCategories(newCats);
@@ -212,7 +215,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
             </div>
 
             <div className="grid grid-cols-2 gap-8">
-              {/* Grid Config */}
+              {/* Board Config */}
               <div className="space-y-4">
                 <h3 className="text-xs uppercase text-zinc-400 font-bold border-b border-zinc-800 pb-1">Board Size</h3>
                 <div className="flex justify-between items-center">
@@ -230,6 +233,29 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                       <span className="text-sm font-mono text-white w-4 text-center">{config.rowCount}</span>
                       <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))}} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
                     </div>
+                </div>
+
+                {/* Point Scale Config */}
+                <h3 className="text-xs uppercase text-zinc-400 font-bold border-b border-zinc-800 pb-1 pt-2">Point System</h3>
+                <div className="flex justify-between items-center">
+                    <div className="flex flex-col">
+                        <label className="text-xs text-zinc-300">Point Scale</label>
+                        <span className="text-[10px] text-zinc-600">Increment per row</span>
+                    </div>
+                    <div className="flex items-center gap-1 bg-black p-1 rounded border border-zinc-800">
+                        {[10, 20, 25, 100].map(val => (
+                            <button
+                                key={val}
+                                onClick={() => { soundService.playClick(); setConfig(p => ({...p, pointScale: val})); }}
+                                className={`px-2 py-1 text-xs font-mono rounded ${config.pointScale === val ? 'bg-gold-600 text-black font-bold' : 'text-zinc-500 hover:text-white'}`}
+                            >
+                                {val}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                <div className="text-[10px] text-zinc-500 font-mono text-right">
+                    Range: {config.pointScale} - {config.pointScale * config.rowCount}
                 </div>
               </div>
 
@@ -282,14 +308,14 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                     title: `Category ${cI + 1}`,
                     questions: Array.from({ length: config.rowCount }).map((_, qI) => ({
                       id: Math.random().toString(),
-                      text: '', answer: '', points: (qI + 1) * 100, isRevealed: false, isAnswered: false, isDoubleOrNothing: false
+                      text: '', answer: '', points: (qI + 1) * config.pointScale, isRevealed: false, isAnswered: false, isDoubleOrNothing: false
                     }))
                   }));
                   setCategories(newCats);
                   setStep('BUILDER');
                   // Trigger generation
                   setIsAiLoading(true);
-                  generateTriviaGame(prompt, diff, config.catCount, config.rowCount).then(generated => {
+                  generateTriviaGame(prompt, diff, config.catCount, config.rowCount, config.pointScale).then(generated => {
                       setCategories(generated);
                       setIsAiLoading(false);
                       addToast('success', 'Board generated!');
@@ -313,7 +339,6 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     );
   }
 
-  // ... (Rest of component remains mostly same, just checking button text consistency)
   return (
     <div className="fixed inset-0 z-40 bg-black flex flex-col animate-in fade-in duration-200">
       {/* HEADER */}

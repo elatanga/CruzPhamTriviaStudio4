@@ -219,6 +219,7 @@ export interface TemplateConfig {
   playerNames?: string[];
   categoryCount: number;
   rowCount: number;
+  pointScale?: number;
 }
 
 export interface GameTemplate {
