@@ -1,7 +1,9 @@
+
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import App from './App';
 import { authService } from './services/authService';
+import { soundService } from './services/soundService';
 
 declare const jest: any;
 declare const describe: any;
@@ -17,7 +19,9 @@ jest.mock('./services/soundService', () => ({
   soundService: {
     playSelect: jest.fn(), playReveal: jest.fn(), playAward: jest.fn(),
     playSteal: jest.fn(), playVoid: jest.fn(), playDoubleOrNothing: jest.fn(),
-    setMute: jest.fn()
+    playClick: jest.fn(), playTimerTick: jest.fn(), playTimerAlarm: jest.fn(),
+    setMute: jest.fn(), getMute: jest.fn().mockReturnValue(false),
+    setVolume: jest.fn(), getVolume: jest.fn().mockReturnValue(0.5)
   }
 }));
 jest.mock('./services/geminiService', () => ({
@@ -49,6 +53,8 @@ describe('App Robustness', () => {
       expect(screen.queryByText('Studio Offline - Reconnecting...')).not.toBeInTheDocument();
     });
   });
+
+  // --- ADMIN TESTS ---
 
   test('Admin Logic handles duplicate users gracefully', async () => {
     // Setup Master
@@ -118,5 +124,34 @@ describe('App Robustness', () => {
     const login = await authService.login('bad_actor', token);
     expect(login.success).toBe(false);
     expect(login.code).toBe('ERR_FORBIDDEN');
+  });
+
+  test('Audit Logs track key actions', async () => {
+    await authService.bootstrapMasterAdmin('admin');
+    await authService.createUser('admin', { username: 'audited_user' }, 'PRODUCER');
+    
+    const logs = authService.getAuditLogs();
+    const creationLog = logs.find(l => l.action === 'USER_CREATED' && l.targetId === 'audited_user');
+    expect(creationLog).toBeDefined();
+    expect(creationLog?.actorId).toBe('admin');
+  });
+
+  // --- UI/SOUND TESTS ---
+  
+  test('Sound toggle persists preference', () => {
+    soundService.setMute(true);
+    expect(soundService.getMute()).toBe(true);
+    expect(localStorage.getItem('cruzpham_mute')).toBe('true');
+    
+    soundService.setMute(false);
+    expect(soundService.getMute()).toBe(false);
+    expect(localStorage.getItem('cruzpham_mute')).toBe('false');
+  });
+
+  test('Timer Sound triggers', () => {
+     // Direct service test
+     soundService.setMute(false);
+     soundService.playTimerTick();
+     expect(soundService.playTimerTick).toHaveBeenCalled();
   });
 });

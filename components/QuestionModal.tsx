@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { X, Check, ShieldAlert, Monitor, ArrowLeft, Trash2, Trophy } from 'lucide-react';
-import { Question, Player } from '../types';
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { X, Check, ShieldAlert, Monitor, ArrowLeft, Trash2, Trophy, Clock } from 'lucide-react';
+import { Question, Player, GameTimer } from '../types';
 import { soundService } from '../services/soundService';
 
 interface Props {
@@ -8,17 +9,56 @@ interface Props {
   categoryTitle: string;
   players: Player[];
   selectedPlayerId: string | null;
+  timer: GameTimer;
   onClose: (action: 'return' | 'void' | 'award' | 'steal', playerId?: string) => void;
   onReveal: () => void;
 }
 
 export const QuestionModal: React.FC<Props> = ({ 
-  question, categoryTitle, players, selectedPlayerId, onClose, onReveal 
+  question, categoryTitle, players, selectedPlayerId, timer, onClose, onReveal 
 }) => {
   const [showStealSelect, setShowStealSelect] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  
   const isRevealed = question.isRevealed;
   const isDouble = question.isDoubleOrNothing || false;
   const activePlayer = players.find(p => p.id === selectedPlayerId);
+
+  // Timer Logic
+  const prevTimeLeft = useRef<number | null>(null);
+
+  useEffect(() => {
+    let interval: number;
+
+    const updateTimer = () => {
+       if (timer.endTime && timer.isRunning) {
+         const remaining = Math.max(0, Math.ceil((timer.endTime - Date.now()) / 1000));
+         setTimeLeft(remaining);
+
+         // Tick Sound
+         if (remaining > 0 && remaining <= 5 && remaining !== prevTimeLeft.current) {
+            soundService.playTimerTick();
+         }
+         // End Sound
+         if (remaining === 0 && prevTimeLeft.current !== 0 && prevTimeLeft.current !== null) {
+            soundService.playTimerAlarm();
+         }
+         prevTimeLeft.current = remaining;
+       } else if (timer.endTime && !timer.isRunning && timeLeft === null) {
+         // Paused or just loaded with existing endTime
+         const remaining = Math.max(0, Math.ceil((timer.endTime - Date.now()) / 1000));
+         setTimeLeft(remaining);
+       } else if (!timer.endTime) {
+         setTimeLeft(null);
+         prevTimeLeft.current = null;
+       }
+    };
+
+    updateTimer(); // Initial
+    interval = window.setInterval(updateTimer, 200);
+
+    return () => clearInterval(interval);
+  }, [timer]);
 
   // Sound effects on mount/update
   useEffect(() => {
@@ -126,6 +166,13 @@ export const QuestionModal: React.FC<Props> = ({
                 DOUBLE OR NOTHING
               </h1>
             </div>
+          )}
+
+          {/* TIMER DISPLAY */}
+          {timeLeft !== null && (
+             <div className={`absolute top-16 right-4 md:right-8 p-3 rounded-full border-2 font-mono text-xl md:text-2xl font-black flex items-center justify-center w-16 h-16 transition-colors duration-300 ${timeLeft <= 5 ? 'bg-red-900 border-red-500 text-white animate-pulse' : 'bg-black/50 border-gold-500 text-gold-500'}`}>
+               {timeLeft}
+             </div>
           )}
 
           {/* Question Text */}

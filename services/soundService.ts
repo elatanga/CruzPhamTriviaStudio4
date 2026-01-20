@@ -266,6 +266,52 @@ class SoundService {
     });
   }
 
+  // --- TIMER SOUNDS ---
+
+  playTimerTick() {
+    if (this.isMuted || !this.getCtx()) return;
+    const ctx = this.getCtx()!;
+    const t = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(800, t);
+    
+    gain.gain.setValueAtTime(this.volume * 0.05, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.05);
+  }
+
+  playTimerAlarm() {
+    if (this.isMuted || !this.getCtx()) return;
+    const ctx = this.getCtx()!;
+    const t = ctx.currentTime;
+
+    // Double beep
+    [0, 0.2].forEach(offset => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(440, t + offset);
+      osc.frequency.linearRampToValueAtTime(300, t + offset + 0.15);
+
+      gain.gain.setValueAtTime(this.volume * 0.2, t + offset);
+      gain.gain.linearRampToValueAtTime(0, t + offset + 0.15);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t + offset);
+      osc.stop(t + offset + 0.2);
+    });
+  }
+
   // --- TOAST FEEDBACK ---
   
   playToast(type: 'success' | 'error' | 'info') {

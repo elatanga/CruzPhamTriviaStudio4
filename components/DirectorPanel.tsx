@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw } from 'lucide-react';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer } from 'lucide-react';
 import { GameState, Question, Difficulty, Category } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
@@ -38,6 +39,30 @@ export const DirectorPanel: React.FC<Props> = ({
     const newCats = [...gameState.categories];
     newCats[cIdx].title = title;
     onUpdateState({ ...gameState, categories: newCats });
+  };
+
+  // Timer Actions
+  const updateTimer = (updates: Partial<typeof gameState.timer>) => {
+    soundService.playClick();
+    onUpdateState({
+      ...gameState,
+      timer: { ...gameState.timer, ...updates }
+    });
+  };
+
+  const startTimer = () => {
+    updateTimer({
+      endTime: Date.now() + (gameState.timer.duration * 1000),
+      isRunning: true
+    });
+  };
+
+  const stopTimer = () => {
+    updateTimer({ isRunning: false });
+  };
+
+  const resetTimer = () => {
+    updateTimer({ endTime: null, isRunning: false });
   };
 
   const handleSaveQuestion = (cIdx: number, qIdx: number, q: Partial<Question>) => {
@@ -173,6 +198,36 @@ export const DirectorPanel: React.FC<Props> = ({
         {/* === BOARD EDITOR === */}
         {activeTab === 'BOARD' && (
           <div className="space-y-6">
+            
+            {/* Timer Control Panel */}
+            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                 <div className="text-gold-500"><Timer className="w-5 h-5" /></div>
+                 <div>
+                   <p className="text-xs font-bold uppercase text-zinc-400">Timer Control</p>
+                   <div className="flex gap-1 mt-1">
+                     {[15, 30, 60].map(d => (
+                       <button 
+                         key={d}
+                         onClick={() => updateTimer({ duration: d })}
+                         className={`px-2 py-0.5 text-[10px] rounded border ${gameState.timer.duration === d ? 'bg-gold-600 text-black border-gold-600' : 'bg-black text-zinc-400 border-zinc-800'}`}
+                       >
+                         {d}s
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {!gameState.timer.isRunning ? (
+                   <button onClick={startTimer} className="bg-green-600 hover:bg-green-500 text-white p-2 rounded-full"><Play className="w-4 h-4" /></button>
+                ) : (
+                   <button onClick={stopTimer} className="bg-yellow-600 hover:bg-yellow-500 text-black p-2 rounded-full"><Pause className="w-4 h-4" /></button>
+                )}
+                <button onClick={resetTimer} className="bg-zinc-800 hover:bg-zinc-700 text-white p-2 rounded-full"><RotateCcw className="w-4 h-4" /></button>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between">
                <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Live Board Control</h3>
                {gameState.activeQuestionId && (

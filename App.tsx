@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppShell } from './components/AppShell';
 import { ToastContainer } from './components/Toast';
@@ -38,7 +39,12 @@ const App: React.FC = () => {
     activeQuestionId: null,
     activeCategoryId: null,
     selectedPlayerId: null,
-    history: []
+    history: [],
+    timer: {
+      duration: 30,
+      endTime: null,
+      isRunning: false
+    }
   });
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -199,7 +205,12 @@ const App: React.FC = () => {
       activeQuestionId: null,
       activeCategoryId: null,
       selectedPlayerId: initPlayers.length > 0 ? initPlayers[0].id : null,
-      history: [`Started: ${template.topic}`]
+      history: [`Started: ${template.topic}`],
+      timer: {
+        duration: 30,
+        endTime: null,
+        isRunning: false
+      }
     };
     saveGameState(newState);
   };
@@ -244,7 +255,13 @@ const App: React.FC = () => {
         categories: newCategories,
         players: newPlayers,
         activeQuestionId: null,
-        activeCategoryId: null
+        activeCategoryId: null,
+        // Reset timer when question closes
+        timer: {
+           ...prev.timer,
+           endTime: null,
+           isRunning: false
+        }
       };
       saveGameState(newState);
       return newState;
@@ -455,6 +472,7 @@ const App: React.FC = () => {
                             categoryTitle={activeCategory.title}
                             players={gameState.players}
                             selectedPlayerId={gameState.selectedPlayerId}
+                            timer={gameState.timer}
                             onClose={handleQuestionClose}
                             onReveal={() => {
                               setGameState(prev => {

@@ -1,3 +1,4 @@
+
 export interface Question {
   id: string;
   text: string;
@@ -22,6 +23,12 @@ export interface Player {
   color: string;
 }
 
+export interface GameTimer {
+  duration: number; // Default duration setting in seconds
+  endTime: number | null; // Target timestamp
+  isRunning: boolean;
+}
+
 export interface GameState {
   showTitle: string;
   isGameStarted: boolean;
@@ -31,6 +38,7 @@ export interface GameState {
   activeCategoryId: string | null;
   selectedPlayerId: string | null;
   history: string[];
+  timer: GameTimer;
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
