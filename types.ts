@@ -77,20 +77,49 @@ export class AppError extends Error {
 // --- AUTHENTICATION & ADMIN TYPES ---
 
 export type UserRole = 'MASTER_ADMIN' | 'ADMIN' | 'PRODUCER';
+export type UserSource = 'MANUAL_CREATE' | 'REQUEST_APPROVAL';
+export type UserStatus = 'ACTIVE' | 'REVOKED';
+
+export interface DeliveryLog {
+  id: string;
+  method: 'EMAIL' | 'SMS';
+  status: 'SENT' | 'FAILED';
+  timestamp: string;
+  providerId?: string;
+  error?: string;
+}
+
+export interface UserProfile {
+  firstName?: string;
+  lastName?: string;
+  tiktokHandle?: string;
+  preferredUsername?: string;
+  source: UserSource;
+  originalRequestId?: string;
+}
 
 export interface User {
   id: string;
   username: string;
   tokenHash: string; // SHA-256 hash
   role: UserRole;
+  status: UserStatus;
+  
+  // Contact
   email?: string;
   phone?: string;
-  firstName?: string;
-  lastName?: string;
-  tiktokHandle?: string;
+  
+  // Detailed Profile
+  profile: UserProfile;
+
+  // Metadata
   createdAt: string;
+  updatedAt: string;
   expiresAt?: string | null; // ISO Date or null for permanent
   createdBy?: string;
+  
+  // Tracking
+  lastDelivery?: DeliveryLog;
 }
 
 export interface Session {
@@ -122,11 +151,30 @@ export interface AuthResponse {
   code?: ErrorCode;
 }
 
+export type AuditAction = 
+  | 'BOOTSTRAP' 
+  | 'LOGIN' 
+  | 'TOKEN_ISSUED' 
+  | 'TOKEN_REFRESHED'
+  | 'TOKEN_REVOKED'
+  | 'ACCESS_GRANTED'
+  | 'ACCESS_REVOKED'
+  | 'USER_CREATED'
+  | 'USER_UPDATED'
+  | 'USER_DELETED'
+  | 'ADMIN_CREATED'
+  | 'MESSAGE_SENT_EMAIL' 
+  | 'MESSAGE_SENT_SMS'
+  | 'REQUEST_APPROVED'
+  | 'REQUEST_REJECTED';
+
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
-  actorId: string; // Username of admin
-  action: 'BOOTSTRAP' | 'LOGIN' | 'TOKEN_ISSUED' | 'TOKEN_REVOKED' | 'USER_DELETED' | 'ADMIN_CREATED' | 'MESSAGE_SENT' | 'REQUEST_APPROVED';
+  actorId: string;
+  actorRole?: string;
+  targetId?: string;
+  action: AuditAction;
   details: string;
   metadata?: any;
 }
@@ -144,6 +192,7 @@ export type Difficulty = 'easy' | 'medium' | 'hard' | 'mixed';
 
 export interface TemplateConfig {
   playerCount: number;
+  playerNames?: string[];
   categoryCount: number;
   rowCount: number;
 }

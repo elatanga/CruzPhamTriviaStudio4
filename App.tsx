@@ -150,6 +150,7 @@ const App: React.FC = () => {
   // --- GAME LOGIC ---
 
   const handlePlayTemplate = (template: GameTemplate) => {
+    // Initialize Categories
     const initCategories = template.categories.map(cat => {
       const luckyIndex = Math.floor(Math.random() * cat.questions.length);
       return {
@@ -164,12 +165,35 @@ const App: React.FC = () => {
       };
     });
 
+    // Initialize Players (from template config if available)
+    const initPlayers: Player[] = (template.config.playerNames || []).map(name => ({
+      id: crypto.randomUUID(),
+      name: name,
+      score: 0,
+      color: '#ffffff'
+    }));
+
+    // Fallback if no specific names but count exists (legacy templates support)
+    if (initPlayers.length === 0 && template.config.playerCount > 0) {
+      for (let i = 0; i < template.config.playerCount; i++) {
+        initPlayers.push({
+          id: crypto.randomUUID(),
+          name: `Player ${i + 1}`,
+          score: 0,
+          color: '#ffffff'
+        });
+      }
+    }
+
     const newState: GameState = {
       ...gameState,
       showTitle: activeShow?.title || '',
       isGameStarted: true,
       categories: initCategories,
+      players: initPlayers,
       activeQuestionId: null,
+      activeCategoryId: null,
+      selectedPlayerId: initPlayers.length > 0 ? initPlayers[0].id : null,
       history: [`Started: ${template.topic}`]
     };
     saveGameState(newState);
@@ -320,13 +344,6 @@ const App: React.FC = () => {
       
       {!session ? (
         <LoginScreen onLoginSuccess={(u) => {
-          // We need to re-fetch session to get role, login screen doesn't pass it back usually but authService does
-          // For simplicity, we just reload window or assume login sets storage correctly.
-          // Let's manually get session from storage or assume LoginScreen updated it?
-          // LoginScreen calls authService.login, which updates localStorage.
-          // But we need to update state 'session'.
-          // Let's reload to be safe or fetch latest session.
-          // Assuming LoginScreen passed 'u' which is username.
           const sessions = JSON.parse(localStorage.getItem('cruzpham_db_sessions') || '{}');
           const sess = Object.values(sessions).find((s: any) => s.username === u) as any;
           if (sess) setSession({ id: sess.id, username: sess.username, role: sess.role });
@@ -352,31 +369,33 @@ const App: React.FC = () => {
             </>
           ) : (
             <>
-               {/* TABS (Only if show is selected) */}
-               <div className="flex justify-center mb-2 animate-in fade-in slide-in-from-top duration-300 relative z-20">
-                 <div className="bg-zinc-900 border border-zinc-800 p-1 rounded-full flex gap-1">
-                   <button 
-                     onClick={() => setViewMode('BOARD')}
-                     className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all ${viewMode === 'BOARD' ? 'bg-gold-600 text-black shadow-lg shadow-gold-500/20' : 'text-zinc-500 hover:text-white'}`}
-                   >
-                     <Monitor className="w-3 h-3" /> Board
-                   </button>
-                   <button 
-                     onClick={() => setViewMode('DIRECTOR')}
-                     className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all ${viewMode === 'DIRECTOR' ? 'bg-gold-600 text-black shadow-lg shadow-gold-500/20' : 'text-zinc-500 hover:text-white'}`}
-                   >
-                     <Grid className="w-3 h-3" /> Director
-                   </button>
-                   {isAdmin && (
+               {/* TABS (Only if show is selected and not in game) */}
+               {!gameState.isGameStarted && (
+                 <div className="flex justify-center mb-2 animate-in fade-in slide-in-from-top duration-300 relative z-20 pt-2">
+                   <div className="bg-zinc-900 border border-zinc-800 p-1 rounded-full flex gap-1">
                      <button 
-                       onClick={() => setViewMode('ADMIN')}
-                       className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all ${viewMode === 'ADMIN' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-zinc-500 hover:text-white'}`}
+                       onClick={() => setViewMode('BOARD')}
+                       className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all ${viewMode === 'BOARD' ? 'bg-gold-600 text-black shadow-lg shadow-gold-500/20' : 'text-zinc-500 hover:text-white'}`}
                      >
-                       <Shield className="w-3 h-3" /> Admin
+                       <Monitor className="w-3 h-3" /> Board
                      </button>
-                   )}
+                     <button 
+                       onClick={() => setViewMode('DIRECTOR')}
+                       className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all ${viewMode === 'DIRECTOR' ? 'bg-gold-600 text-black shadow-lg shadow-gold-500/20' : 'text-zinc-500 hover:text-white'}`}
+                     >
+                       <Grid className="w-3 h-3" /> Director
+                     </button>
+                     {isAdmin && (
+                       <button 
+                         onClick={() => setViewMode('ADMIN')}
+                         className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all ${viewMode === 'ADMIN' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-zinc-500 hover:text-white'}`}
+                       >
+                         <Shield className="w-3 h-3" /> Admin
+                       </button>
+                     )}
+                   </div>
                  </div>
-               </div>
+               )}
 
                <div className="flex-1 relative overflow-hidden">
                  {/* BOARD VIEW */}
@@ -390,18 +409,28 @@ const App: React.FC = () => {
                       />
                     ) : (
                       <>
-                        <div className="flex flex-col md:flex-row h-full">
-                          <div className="flex-1 order-2 md:order-1 h-full overflow-hidden relative flex flex-col">
-                            <div className="flex-none p-2 flex justify-start border-b border-zinc-900 bg-black/50">
-                              <button onClick={() => { if(confirm("End game?")) setGameState(p => ({...p, isGameStarted: false})); }} className="text-[10px] uppercase text-zinc-500 hover:text-red-400 font-bold tracking-wider px-2">
-                                &larr; End Game
+                        <div className="flex flex-col md:flex-row h-full w-full overflow-hidden">
+                          {/* Board Area */}
+                          <div className="flex-1 order-2 md:order-1 h-full overflow-hidden relative flex flex-col min-w-0">
+                             {/* End Game Button Bar - Minimalist */}
+                            <div className="flex-none p-1 flex justify-start border-b border-zinc-900 bg-black z-20">
+                              <button onClick={() => { if(confirm("End game?")) setGameState(p => ({...p, isGameStarted: false})); }} className="text-[10px] uppercase text-zinc-500 hover:text-red-400 font-bold tracking-wider px-2 py-1">
+                                &larr; End Show
+                              </button>
+                              <div className="flex-1" />
+                              <button onClick={() => setViewMode('DIRECTOR')} className="text-[10px] uppercase text-zinc-500 hover:text-white font-bold tracking-wider px-2 py-1 md:hidden">
+                                Director
                               </button>
                             </div>
-                            <div className="flex-1 overflow-hidden relative">
+
+                            {/* Main Board */}
+                            <div className="flex-1 relative w-full h-full overflow-hidden">
                               <GameBoard categories={gameState.categories} onSelectQuestion={handleSelectQuestion} />
                             </div>
                           </div>
-                          <div className="order-1 md:order-2 flex-none h-48 md:h-full">
+                          
+                          {/* Scoreboard Area - Responsive Split */}
+                          <div className="order-1 md:order-2 flex-none h-[25vh] md:h-full w-full md:w-auto relative z-30">
                             <Scoreboard 
                                 players={gameState.players} 
                                 selectedPlayerId={gameState.selectedPlayerId}
@@ -412,7 +441,11 @@ const App: React.FC = () => {
                             />
                           </div>
                         </div>
-                        <ShortcutsPanel />
+                        
+                        <div className="hidden md:block">
+                          <ShortcutsPanel />
+                        </div>
+                        
                         {activeQuestion && activeCategory && (
                           <QuestionModal 
                             question={activeQuestion}

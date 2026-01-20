@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus } from 'lucide-react';
+import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2 } from 'lucide-react';
 import { GameTemplate, Category, Question, Difficulty } from '../types';
-import { generateTriviaGame, generateSingleQuestion } from '../services/geminiService';
+import { generateTriviaGame, generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { dataService } from '../services/dataService';
 
 interface Props {
@@ -20,10 +20,15 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   // Config State
   const [config, setConfig] = useState({
     title: initialTemplate?.topic || '',
-    playerCount: initialTemplate?.config?.playerCount || 4,
     catCount: initialTemplate?.categories.length || 4,
     rowCount: initialTemplate?.config?.rowCount || 5,
   });
+
+  // Player Names State - Initialize from template or defaults
+  const [playerNames, setPlayerNames] = useState<string[]>(
+    initialTemplate?.config?.playerNames || 
+    (initialTemplate?.config?.playerCount ? Array.from({length: initialTemplate.config.playerCount}).map((_, i) => `Player ${i+1}`) : ['Player 1', 'Player 2', 'Player 3', 'Player 4'])
+  );
 
   // Builder State
   const [categories, setCategories] = useState<Category[]>(initialTemplate?.categories || []);
@@ -39,6 +44,11 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   const initBoard = () => {
     if (!config.title.trim()) {
       addToast('error', 'Title is required');
+      return;
+    }
+
+    if (playerNames.some(n => !n.trim())) {
+      addToast('error', 'All player names must be filled');
       return;
     }
 
@@ -68,14 +78,16 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
           topic: config.title,
           categories,
           config: {
-            playerCount: config.playerCount,
+            playerCount: playerNames.length,
+            playerNames: playerNames,
             categoryCount: categories.length,
             rowCount: categories[0]?.questions.length || config.rowCount
           }
         });
       } else {
         dataService.createTemplate(showId, config.title, {
-          playerCount: config.playerCount,
+          playerCount: playerNames.length,
+          playerNames: playerNames,
           categoryCount: categories.length,
           rowCount: categories[0]?.questions.length || config.rowCount
         }, categories);
@@ -92,11 +104,35 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     setIsAiLoading(true);
     try {
       const generatedCats = await generateTriviaGame(prompt, difficulty, categories.length, categories[0].questions.length);
-      // Merge IDs to preserve structure if needed, but here we just replace content
+      // Replace content but try to maintain IDs where possible to be safe, though replacing state is cleaner
+      // We will trust the generatedCats structure matches the grid
       setCategories(generatedCats);
+      setConfig(prev => ({...prev, title: prompt})); // Auto update title to topic
       addToast('success', 'Board populated by AI.');
     } catch (e) {
       addToast('error', 'AI Generation failed.');
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const handleAiRewriteCategory = async (cIdx: number) => {
+    if (!confirm('Rewrite entire category? Existing content will be lost.')) return;
+    setIsAiLoading(true);
+    try {
+      const cat = categories[cIdx];
+      const newQs = await generateCategoryQuestions(config.title, cat.title, cat.questions.length, 'mixed');
+      
+      const newCats = [...categories];
+      newCats[cIdx].questions = newQs.map((nq, i) => ({
+        ...nq,
+        points: (i + 1) * 100,
+        id: cat.questions[i]?.id || nq.id 
+      }));
+      setCategories(newCats);
+      addToast('success', `Category "${cat.title}" rewritten.`);
+    } catch (e) {
+      addToast('error', 'AI Failed to rewrite category.');
     } finally {
       setIsAiLoading(false);
     }
@@ -140,10 +176,10 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   if (step === 'CONFIG') {
     return (
       <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg bg-zinc-900 border border-gold-600 rounded-xl p-8 shadow-2xl">
-          <h2 className="text-2xl font-serif text-white mb-6">New Template Configuration</h2>
+        <div className="w-full max-w-2xl bg-zinc-900 border border-gold-600 rounded-xl p-8 shadow-2xl flex flex-col max-h-[90vh]">
+          <h2 className="text-2xl font-serif text-white mb-6 flex-none">New Template Configuration</h2>
           
-          <div className="space-y-6">
+          <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6">
             <div>
               <label className="block text-xs uppercase text-gold-500 font-bold mb-1">Trivia Game Title</label>
               <input 
@@ -153,37 +189,100 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center">
-                <label className="block text-[10px] uppercase text-zinc-500 font-bold mb-2">Players (1-8)</label>
-                <div className="flex items-center justify-center gap-2 bg-black p-2 rounded border border-zinc-800">
-                  <button onClick={() => setConfig(p => ({...p, playerCount: Math.max(1, p.playerCount - 1)}))} className="text-gold-500 hover:text-white"><Minus className="w-4 h-4" /></button>
-                  <span className="text-xl font-mono text-white w-6">{config.playerCount}</span>
-                  <button onClick={() => setConfig(p => ({...p, playerCount: Math.min(8, p.playerCount + 1)}))} className="text-gold-500 hover:text-white"><Plus className="w-4 h-4" /></button>
+            <div className="grid grid-cols-2 gap-8">
+              {/* Grid Config */}
+              <div className="space-y-4">
+                <h3 className="text-xs uppercase text-zinc-400 font-bold border-b border-zinc-800 pb-1">Board Size</h3>
+                <div className="flex justify-between items-center">
+                    <label className="text-xs text-zinc-300">Categories (1-8)</label>
+                    <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
+                      <button onClick={() => setConfig(p => ({...p, catCount: Math.max(1, p.catCount - 1)}))} className="text-gold-500 hover:text-white p-1"><Minus className="w-3 h-3" /></button>
+                      <span className="text-sm font-mono text-white w-4 text-center">{config.catCount}</span>
+                      <button onClick={() => setConfig(p => ({...p, catCount: Math.min(8, p.catCount + 1)}))} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
+                    </div>
+                </div>
+                <div className="flex justify-between items-center">
+                    <label className="text-xs text-zinc-300">Rows (1-10)</label>
+                    <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
+                      <button onClick={() => setConfig(p => ({...p, rowCount: Math.max(1, p.rowCount - 1)}))} className="text-gold-500 hover:text-white p-1"><Minus className="w-3 h-3" /></button>
+                      <span className="text-sm font-mono text-white w-4 text-center">{config.rowCount}</span>
+                      <button onClick={() => setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
+                    </div>
                 </div>
               </div>
-              <div className="text-center">
-                <label className="block text-[10px] uppercase text-zinc-500 font-bold mb-2">Categories (1-8)</label>
-                <div className="flex items-center justify-center gap-2 bg-black p-2 rounded border border-zinc-800">
-                  <button onClick={() => setConfig(p => ({...p, catCount: Math.max(1, p.catCount - 1)}))} className="text-gold-500 hover:text-white"><Minus className="w-4 h-4" /></button>
-                  <span className="text-xl font-mono text-white w-6">{config.catCount}</span>
-                  <button onClick={() => setConfig(p => ({...p, catCount: Math.min(8, p.catCount + 1)}))} className="text-gold-500 hover:text-white"><Plus className="w-4 h-4" /></button>
+
+              {/* Player Config */}
+              <div className="space-y-4">
+                <div className="flex justify-between items-center border-b border-zinc-800 pb-1">
+                   <h3 className="text-xs uppercase text-zinc-400 font-bold">Contestants ({playerNames.length}/8)</h3>
+                   {playerNames.length < 8 && (
+                     <button onClick={() => setPlayerNames([...playerNames, `Player ${playerNames.length + 1}`])} className="text-[10px] text-gold-500 hover:text-white flex items-center gap-1">
+                       <Plus className="w-3 h-3" /> ADD
+                     </button>
+                   )}
+                </div>
+                <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                   {playerNames.map((name, idx) => (
+                     <div key={idx} className="flex gap-2">
+                        <input 
+                            value={name} 
+                            onChange={(e) => {
+                                const newNames = [...playerNames];
+                                newNames[idx] = e.target.value;
+                                setPlayerNames(newNames);
+                            }}
+                            className="flex-1 bg-black border border-zinc-800 p-1.5 rounded text-white text-xs focus:border-gold-500 outline-none placeholder:text-zinc-700"
+                            placeholder={`Player ${idx+1}`}
+                        />
+                        {playerNames.length > 1 && (
+                            <button onClick={() => setPlayerNames(playerNames.filter((_, i) => i !== idx))} className="text-zinc-600 hover:text-red-500 px-1">
+                                <Trash2 className="w-3 h-3" />
+                            </button>
+                        )}
+                     </div>
+                   ))}
                 </div>
               </div>
-              <div className="text-center">
-                <label className="block text-[10px] uppercase text-zinc-500 font-bold mb-2">Rows (1-10)</label>
-                <div className="flex items-center justify-center gap-2 bg-black p-2 rounded border border-zinc-800">
-                  <button onClick={() => setConfig(p => ({...p, rowCount: Math.max(1, p.rowCount - 1)}))} className="text-gold-500 hover:text-white"><Minus className="w-4 h-4" /></button>
-                  <span className="text-xl font-mono text-white w-6">{config.rowCount}</span>
-                  <button onClick={() => setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))} className="text-gold-500 hover:text-white"><Plus className="w-4 h-4" /></button>
-                </div>
-              </div>
+            </div>
+            
+            {/* AI Generator In Config */}
+            <div className="bg-zinc-950 p-4 rounded border border-zinc-800">
+               <h3 className="text-xs uppercase text-gold-600 font-bold mb-2 flex items-center gap-2"><Wand2 className="w-3 h-3" /> Instant Start</h3>
+               <p className="text-[10px] text-zinc-500 mb-3">Skip manual setup and let AI generate the entire board structure and content.</p>
+               <AiToolbar onGenerate={(prompt, diff) => {
+                  setConfig(p => ({...p, title: prompt}));
+                  // We need to initialize categories first then fill
+                  const newCats = Array.from({ length: config.catCount }).map((_, cI) => ({
+                    id: Math.random().toString(),
+                    title: `Category ${cI + 1}`,
+                    questions: Array.from({ length: config.rowCount }).map((_, qI) => ({
+                      id: Math.random().toString(),
+                      text: '', answer: '', points: (qI + 1) * 100, isRevealed: false, isAnswered: false
+                    }))
+                  }));
+                  setCategories(newCats);
+                  setStep('BUILDER');
+                  // Trigger generation after render/state update logic handled (simulated by just calling fill immediately on local var or state if async)
+                  // Actually, better to just call logic here and set state once.
+                  setIsAiLoading(true);
+                  generateTriviaGame(prompt, diff, config.catCount, config.rowCount).then(generated => {
+                      setCategories(generated);
+                      setIsAiLoading(false);
+                      addToast('success', 'Board generated!');
+                  }).catch(() => {
+                      setIsAiLoading(false);
+                      addToast('error', 'Generation failed');
+                  });
+               }} />
             </div>
 
-            <div className="flex gap-3 mt-8">
-              <button onClick={onClose} className="flex-1 py-3 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800">Cancel</button>
-              <button onClick={initBoard} disabled={!config.title} className="flex-1 py-3 rounded bg-gold-600 text-black font-bold hover:bg-gold-500 disabled:opacity-50">Start Building</button>
-            </div>
+          </div>
+
+          <div className="flex gap-3 mt-8 pt-4 border-t border-zinc-800 flex-none">
+             <button onClick={onClose} className="flex-1 py-3 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 text-sm">Cancel</button>
+             <button onClick={initBoard} disabled={!config.title || isAiLoading} className="flex-1 py-3 rounded bg-gold-600 text-black font-bold hover:bg-gold-500 disabled:opacity-50 text-sm flex items-center justify-center gap-2">
+               {isAiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Start Building'}
+             </button>
           </div>
         </div>
       </div>
@@ -219,11 +318,21 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
           {categories.map((cat, cIdx) => (
             <div key={cat.id} className="flex flex-col gap-2">
               {/* Header */}
-              <input 
-                value={cat.title}
-                onChange={(e) => updateCatTitle(cIdx, e.target.value)}
-                className="bg-gold-700 text-black font-bold text-center p-3 rounded uppercase text-sm border-b-4 border-gold-900 outline-none focus:bg-gold-600"
-              />
+              <div className="relative group/header">
+                <input 
+                  value={cat.title}
+                  onChange={(e) => updateCatTitle(cIdx, e.target.value)}
+                  className="w-full bg-gold-700 text-black font-bold text-center p-3 rounded uppercase text-sm border-b-4 border-gold-900 outline-none focus:bg-gold-600"
+                />
+                <button 
+                  onClick={() => handleAiRewriteCategory(cIdx)}
+                  className="absolute top-1 right-1 p-1 bg-black/20 hover:bg-black/50 rounded text-black hover:text-white opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  title="AI Rewrite Category"
+                >
+                  <Wand2 className="w-3 h-3" />
+                </button>
+              </div>
+
               {/* Rows */}
               {cat.questions.map((q, qIdx) => (
                 <div 
@@ -308,7 +417,7 @@ const AiToolbar: React.FC<{ onGenerate: (p: string, d: Difficulty) => void }> = 
   if (!isOpen) {
     return (
       <button onClick={() => setIsOpen(true)} className="text-gold-500 border border-gold-600/50 hover:bg-gold-900/20 px-3 py-2 rounded flex items-center gap-2 text-xs uppercase font-bold transition-all">
-        <Wand2 className="w-4 h-4" /> AI Tools
+        <Wand2 className="w-4 h-4" /> AI Generate
       </button>
     );
   }
@@ -318,7 +427,7 @@ const AiToolbar: React.FC<{ onGenerate: (p: string, d: Difficulty) => void }> = 
       <input 
         value={prompt}
         onChange={e => setPrompt(e.target.value)}
-        placeholder="Topic for full board..."
+        placeholder="Topic for board..."
         className="bg-black text-white text-xs p-2 rounded w-48 border border-zinc-700 focus:border-gold-500 outline-none"
       />
       <select 

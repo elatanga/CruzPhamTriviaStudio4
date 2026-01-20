@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Inbox, Shield, Search, Check, X, Copy, Trash2, Clock, Mail, MessageSquare, Plus, Loader2 } from 'lucide-react';
+import { Users, Inbox, Shield, Search, Check, X, Copy, Trash2, Clock, Mail, MessageSquare, Plus, Loader2, RefreshCw, Key, Ban, UserCheck, AlertTriangle, Send, Eye, FileText } from 'lucide-react';
 import { authService } from '../services/authService';
-import { User, TokenRequest, AuditLogEntry, UserRole } from '../types';
+import { User, TokenRequest, AuditLogEntry, UserRole, UserSource } from '../types';
 
 interface Props {
   currentUser: string;
@@ -10,233 +10,502 @@ interface Props {
 }
 
 export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) => {
-  const [activeTab, setActiveTab] = useState<'USERS' | 'INBOX' | 'AUDIT'>('INBOX');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'INBOX' | 'AUDIT'>('USERS');
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<TokenRequest[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Master Admin Check
+  const myself = users.find(u => u.username === currentUser);
+  const isMaster = myself?.role === 'MASTER_ADMIN';
 
-  // New User Form State
+  // State: Filtering
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterRole, setFilterRole] = useState<'ALL' | 'ADMIN' | 'PRODUCER'>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'REVOKED'>('ALL');
+
+  // State: Modals / Actions
   const [isCreating, setIsCreating] = useState(false);
-  const [newUser, setNewUser] = useState({ username: '', role: 'PRODUCER' as UserRole, duration: '' });
+  const [newUser, setNewUser] = useState({ username: '', role: 'PRODUCER' as UserRole, duration: '', email: '', phone: '', tiktok: '', firstName: '', lastName: '' });
+  const [actionLoading, setActionLoading] = useState<string | null>(null); 
+  
+  // Modals
+  const [credentialModal, setCredentialModal] = useState<{username: string, token: string} | null>(null);
+  const [viewUser, setViewUser] = useState<User | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    type: 'REVOKE' | 'GRANT' | 'REFRESH' | 'DELETE';
+    username: string;
+  } | null>(null);
 
   useEffect(() => {
     refreshData();
   }, [activeTab]);
 
   const refreshData = () => {
-    if (activeTab === 'USERS') setUsers(authService.getAllUsers());
-    if (activeTab === 'INBOX') setRequests(authService.getRequests());
-    if (activeTab === 'AUDIT') setAuditLogs(authService.getAuditLogs());
+    setUsers(authService.getAllUsers());
+    setRequests(authService.getRequests());
+    setAuditLogs(authService.getAuditLogs());
   };
+
+  // --- ACTIONS ---
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const duration = newUser.duration ? parseInt(newUser.duration) : undefined;
-      const token = await authService.createUser(currentUser, { username: newUser.username }, newUser.role, duration);
+      const token = await authService.createUser(currentUser, { 
+        username: newUser.username,
+        email: newUser.email,
+        phone: newUser.phone,
+        profile: {
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+          tiktokHandle: newUser.tiktok,
+          source: 'MANUAL_CREATE' as UserSource
+        }
+      }, newUser.role, duration);
+      
       addToast('success', 'User created.');
-      // Show token ONCE
-      prompt('COPY THIS TOKEN IMMEDIATELY. IT WILL NOT BE SHOWN AGAIN.', token);
+      setCredentialModal({ username: newUser.username, token });
+      
       setIsCreating(false);
-      setNewUser({ username: '', role: 'PRODUCER', duration: '' });
+      setNewUser({ username: '', role: 'PRODUCER', duration: '', email: '', phone: '', tiktok: '', firstName: '', lastName: '' });
       refreshData();
     } catch (e: any) {
       addToast('error', e.message);
     }
   };
 
-  const handleDeleteUser = async (username: string) => {
-    if (!confirm(`Permanently delete ${username}?`)) return;
+  const executeAction = async () => {
+    if (!confirmAction) return;
+    const { type, username } = confirmAction;
+    setActionLoading(username);
+    setConfirmAction(null);
+
     try {
-      await authService.deleteUser(currentUser, username);
-      addToast('info', 'User deleted.');
+      if (type === 'REFRESH') {
+        const token = await authService.refreshToken(currentUser, username);
+        setCredentialModal({ username, token });
+        addToast('success', 'Token rotated successfully.');
+      } else if (type === 'REVOKE') {
+        await authService.toggleAccess(currentUser, username, true);
+        addToast('success', 'Access revoked.');
+      } else if (type === 'GRANT') {
+        await authService.toggleAccess(currentUser, username, false);
+        addToast('success', 'Access restored.');
+      } else if (type === 'DELETE') {
+        await authService.deleteUser(currentUser, username);
+        addToast('info', 'User deleted.');
+      }
       refreshData();
     } catch (e: any) {
       addToast('error', e.message);
+    } finally {
+      setActionLoading(null);
     }
   };
 
-  const handleApprove = async (reqId: string) => {
-    // For simplicity, auto-approve for now or prompt for duration
+  const handleSendMessage = async (targetUsername: string, method: 'EMAIL' | 'SMS', content?: string) => {
+    setActionLoading(targetUsername);
+    const msg = content || `Hello ${targetUsername}, please access your CruzPham account.`;
     try {
-      const token = await authService.approveRequest(currentUser, reqId, undefined, ['EMAIL', 'SMS']);
-      addToast('success', 'Request approved & notified.');
-      // Optional: Show token manually if notification fails
-      console.log('Manual Token Fallback:', token);
+      await authService.sendMessage(currentUser, targetUsername, method, msg);
+      addToast('success', `${method} sent successfully.`);
       refreshData();
     } catch (e: any) {
-      addToast('error', e.message);
+      addToast('error', `Send failed: ${e.message}`);
+    } finally {
+      setActionLoading(null);
     }
   };
 
-  const handleReject = async (reqId: string) => {
-    if (!confirm('Reject request?')) return;
-    await authService.rejectRequest(currentUser, reqId);
-    refreshData();
-  };
+  // --- FILTER LOGIC ---
+  const filteredUsers = users.filter(u => {
+    const matchSearch = 
+      u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.phone && u.phone.includes(searchTerm)) ||
+      (u.email && u.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (u.profile.tiktokHandle && u.profile.tiktokHandle.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    const matchRole = filterRole === 'ALL' || u.role === filterRole;
+    const matchStatus = filterStatus === 'ALL' || (filterStatus === 'REVOKED' ? u.status === 'REVOKED' : u.status === 'ACTIVE');
 
-  // Filter Logic
-  const filteredRequests = requests.filter(r => 
-    r.preferredUsername.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.tiktokHandle.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.id.includes(searchTerm)
-  );
+    return matchSearch && matchRole && matchStatus;
+  });
 
   return (
-    <div className="h-full flex flex-col bg-zinc-950 text-white">
+    <div className="h-full flex flex-col bg-zinc-950 text-white font-sans">
       {/* Header */}
-      <div className="flex-none h-16 bg-black border-b border-zinc-800 flex items-center justify-between px-6">
+      <div className="flex-none h-16 bg-black border-b border-zinc-800 flex items-center justify-between px-6 shadow-md z-10">
         <h2 className="text-xl font-serif font-bold text-gold-500 tracking-wider flex items-center gap-2">
           <Shield className="w-6 h-6" /> ADMIN CONSOLE
         </h2>
         <div className="flex bg-zinc-900 p-1 rounded-full border border-zinc-800">
-          <button onClick={() => setActiveTab('INBOX')} className={`px-4 py-1.5 rounded-full text-xs font-bold ${activeTab === 'INBOX' ? 'bg-gold-600 text-black' : 'text-zinc-500'}`}>INBOX</button>
-          <button onClick={() => setActiveTab('USERS')} className={`px-4 py-1.5 rounded-full text-xs font-bold ${activeTab === 'USERS' ? 'bg-gold-600 text-black' : 'text-zinc-500'}`}>USERS</button>
-          <button onClick={() => setActiveTab('AUDIT')} className={`px-4 py-1.5 rounded-full text-xs font-bold ${activeTab === 'AUDIT' ? 'bg-gold-600 text-black' : 'text-zinc-500'}`}>LOGS</button>
+          <button onClick={() => setActiveTab('USERS')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeTab === 'USERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}>USERS</button>
+          <button onClick={() => setActiveTab('INBOX')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeTab === 'INBOX' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}>INBOX</button>
+          <button onClick={() => setActiveTab('AUDIT')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeTab === 'AUDIT' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}>LOGS</button>
         </div>
         <button onClick={onClose} className="text-zinc-500 hover:text-white"><X className="w-6 h-6" /></button>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-6 custom-scrollbar">
-        
-        {/* === USERS TAB === */}
-        {activeTab === 'USERS' && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h3 className="text-zinc-400 font-bold text-sm">ACTIVE ACCOUNTS</h3>
-              <button onClick={() => setIsCreating(true)} className="bg-gold-900/20 text-gold-500 border border-gold-900 hover:bg-gold-600 hover:text-black px-4 py-2 rounded text-xs font-bold flex items-center gap-2">
-                <Plus className="w-4 h-4" /> ISSUE TOKEN
-              </button>
-            </div>
+      <div className="flex-1 overflow-hidden relative">
+        <div className="h-full overflow-auto p-6 custom-scrollbar">
+          
+          {/* === USERS TAB === */}
+          {activeTab === 'USERS' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              
+              {/* Toolbar */}
+              <div className="flex flex-col md:flex-row gap-4 justify-between items-end md:items-center bg-zinc-900/50 p-4 rounded-lg border border-zinc-800">
+                <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
+                  <div className="flex items-center bg-black p-2 rounded border border-zinc-700 w-full md:w-64">
+                    <Search className="w-4 h-4 text-zinc-500 ml-1" />
+                    <input 
+                      placeholder="Search users..."
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      className="bg-transparent border-none outline-none text-white text-xs ml-2 w-full placeholder:text-zinc-600"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <select value={filterRole} onChange={e => setFilterRole(e.target.value as any)} className="bg-black border border-zinc-700 text-xs text-zinc-300 rounded p-2 outline-none">
+                      <option value="ALL">All Roles</option>
+                      <option value="PRODUCER">Producers</option>
+                      <option value="ADMIN">Admins</option>
+                    </select>
+                    <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)} className="bg-black border border-zinc-700 text-xs text-zinc-300 rounded p-2 outline-none">
+                      <option value="ALL">All Status</option>
+                      <option value="ACTIVE">Active</option>
+                      <option value="REVOKED">Revoked</option>
+                    </select>
+                  </div>
+                </div>
+                <button onClick={() => setIsCreating(true)} className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-4 py-2 rounded text-xs flex items-center gap-2 shadow-lg shadow-gold-500/10">
+                  <Plus className="w-4 h-4" /> CREATE USER
+                </button>
+              </div>
 
-            {isCreating && (
-              <form onSubmit={handleCreateUser} className="bg-zinc-900 p-4 rounded border border-gold-500/30 mb-6 flex gap-4 items-end animate-in fade-in">
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase text-zinc-500 font-bold">Username</label>
-                  <input required value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} className="bg-black border border-zinc-700 p-2 rounded text-white text-xs w-48" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase text-zinc-500 font-bold">Role</label>
-                  <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})} className="bg-black border border-zinc-700 p-2 rounded text-white text-xs">
-                    <option value="PRODUCER">Producer</option>
-                    <option value="ADMIN">Admin</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase text-zinc-500 font-bold">Duration (Mins, Optional)</label>
-                  <input type="number" placeholder="Permanent" value={newUser.duration} onChange={e => setNewUser({...newUser, duration: e.target.value})} className="bg-black border border-zinc-700 p-2 rounded text-white text-xs w-32" />
-                </div>
-                <button type="submit" className="bg-gold-600 text-black font-bold px-4 py-2 rounded text-xs">Generate</button>
-                <button type="button" onClick={() => setIsCreating(false)} className="text-zinc-500 hover:text-white px-2">Cancel</button>
-              </form>
-            )}
+              {/* Create User Form */}
+              {isCreating && (
+                <form onSubmit={handleCreateUser} className="bg-zinc-900 p-6 rounded-lg border border-gold-500/30 mb-6 animate-in slide-in-from-top-4">
+                  <h3 className="text-gold-500 font-bold mb-4 flex items-center gap-2"><Plus className="w-4 h-4" /> New Account</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase text-zinc-500 font-bold">Username *</label>
+                      <input required value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs focus:border-gold-500 outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase text-zinc-500 font-bold">First Name</label>
+                      <input value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs focus:border-gold-500 outline-none" />
+                    </div>
+                     <div className="space-y-1">
+                      <label className="text-[10px] uppercase text-zinc-500 font-bold">Last Name</label>
+                      <input value={newUser.lastName} onChange={e => setNewUser({...newUser, lastName: e.target.value})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs focus:border-gold-500 outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase text-zinc-500 font-bold">Role</label>
+                      <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs outline-none">
+                        <option value="PRODUCER">Producer</option>
+                        {isMaster && <option value="ADMIN">Admin</option>}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase text-zinc-500 font-bold">Email (Optional)</label>
+                      <input type="email" value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs focus:border-gold-500 outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase text-zinc-500 font-bold">Phone (Optional)</label>
+                      <input type="tel" value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs focus:border-gold-500 outline-none" />
+                    </div>
+                     <div className="space-y-1">
+                      <label className="text-[10px] uppercase text-zinc-500 font-bold">Duration (Mins, Optional)</label>
+                      <input type="number" placeholder="Permanent" value={newUser.duration} onChange={e => setNewUser({...newUser, duration: e.target.value})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs focus:border-gold-500 outline-none" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button type="button" onClick={() => setIsCreating(false)} className="text-zinc-500 hover:text-white px-4 py-2 text-xs">Cancel</button>
+                    <button type="submit" className="bg-gold-600 text-black font-bold px-6 py-2 rounded text-xs hover:bg-gold-500">Generate & Send</button>
+                  </div>
+                </form>
+              )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {users.map(u => (
-                <div key={u.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded relative group hover:border-zinc-600">
-                  <div className="flex justify-between items-start mb-2">
-                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${u.role === 'MASTER_ADMIN' ? 'bg-purple-900 text-purple-200' : u.role === 'ADMIN' ? 'bg-blue-900 text-blue-200' : 'bg-zinc-800 text-zinc-400'}`}>
-                      {u.role}
-                    </span>
+              {/* Users Grid */}
+              <div className="grid grid-cols-1 gap-4">
+                {filteredUsers.map(u => (
+                  <div key={u.id} className={`bg-zinc-900 border p-4 rounded-lg flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between group transition-all ${u.status === 'REVOKED' ? 'border-red-900/50 opacity-70' : 'border-zinc-800 hover:border-zinc-600'}`}>
+                    
+                    {/* User Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-1">
+                        <h4 className="font-bold text-white text-lg truncate">{u.username}</h4>
+                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${u.role === 'MASTER_ADMIN' ? 'bg-purple-900 text-purple-200' : u.role === 'ADMIN' ? 'bg-blue-900 text-blue-200' : 'bg-gold-900/30 text-gold-500'}`}>
+                          {u.role}
+                        </span>
+                        {u.status === 'REVOKED' && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase">REVOKED</span>}
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
+                        <span>{u.profile.firstName} {u.profile.lastName}</span>
+                        {u.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {u.email}</span>}
+                        {u.phone && <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" /> {u.phone}</span>}
+                      </div>
+                      {u.lastDelivery && (
+                         <div className={`text-[10px] mt-2 flex items-center gap-1 ${u.lastDelivery.status === 'SENT' ? 'text-green-500' : 'text-red-500'}`}>
+                           {u.lastDelivery.status === 'SENT' ? <Check className="w-3 h-3"/> : <AlertTriangle className="w-3 h-3"/>}
+                           Last Delivery: {u.lastDelivery.method} ({new Date(u.lastDelivery.timestamp).toLocaleDateString()})
+                         </div>
+                      )}
+                    </div>
+
+                    {/* Actions Toolbar */}
                     {u.role !== 'MASTER_ADMIN' && (
-                      <button onClick={() => handleDeleteUser(u.username)} className="text-zinc-600 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                      <div className="flex flex-wrap items-center gap-2">
+                         <button onClick={() => setViewUser(u)} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700" title="View Details">
+                           <FileText className="w-4 h-4" />
+                         </button>
+
+                         <div className="w-px h-6 bg-zinc-800 mx-1" />
+
+                         {/* Credential Actions */}
+                         <button 
+                           onClick={() => setConfirmAction({ type: 'REFRESH', username: u.username })}
+                           disabled={actionLoading === u.username}
+                           className="flex items-center gap-1 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-[10px] font-bold uppercase border border-zinc-700"
+                           title="Rotate Token"
+                         >
+                           {actionLoading === u.username ? <Loader2 className="w-3 h-3 animate-spin"/> : <RefreshCw className="w-3 h-3" />} Token
+                         </button>
+                         
+                         {/* Delivery Actions */}
+                         {u.email && (
+                            <button 
+                              onClick={() => handleSendMessage(u.username, 'EMAIL')} 
+                              disabled={actionLoading === u.username}
+                              className="p-1.5 bg-zinc-800 hover:bg-blue-900/50 text-blue-400 rounded border border-zinc-700" title="Email Info"
+                            >
+                              <Mail className="w-4 h-4" />
+                            </button>
+                         )}
+                         {u.phone && (
+                            <button 
+                              onClick={() => handleSendMessage(u.username, 'SMS')} 
+                              disabled={actionLoading === u.username}
+                              className="p-1.5 bg-zinc-800 hover:bg-green-900/50 text-green-400 rounded border border-zinc-700" title="Text Info"
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                            </button>
+                         )}
+
+                         <div className="w-px h-6 bg-zinc-800 mx-1" />
+
+                         {/* Access Control */}
+                         {u.status === 'REVOKED' ? (
+                           <button onClick={() => setConfirmAction({ type: 'GRANT', username: u.username })} className="text-green-500 hover:bg-green-900/20 px-3 py-1.5 rounded text-[10px] font-bold uppercase border border-green-900 flex items-center gap-1">
+                             <UserCheck className="w-3 h-3" /> Grant
+                           </button>
+                         ) : (
+                           <button onClick={() => setConfirmAction({ type: 'REVOKE', username: u.username })} className="text-orange-500 hover:bg-orange-900/20 px-3 py-1.5 rounded text-[10px] font-bold uppercase border border-orange-900 flex items-center gap-1">
+                             <Ban className="w-3 h-3" /> Revoke
+                           </button>
+                         )}
+
+                         <button onClick={() => setConfirmAction({ type: 'DELETE', username: u.username })} className="text-red-500 hover:bg-red-900/20 p-1.5 rounded border border-transparent hover:border-red-900 ml-1">
+                           <Trash2 className="w-4 h-4" />
+                         </button>
+                      </div>
                     )}
                   </div>
-                  <div className="font-bold text-lg text-white mb-1">{u.username}</div>
-                  <div className="text-xs text-zinc-500 flex flex-col gap-1">
-                    {u.tiktokHandle && <span>TikTok: {u.tiktokHandle}</span>}
-                    {u.expiresAt ? (
-                      <span className="text-orange-400 flex items-center gap-1"><Clock className="w-3 h-3" /> Exp: {new Date(u.expiresAt).toLocaleString()}</span>
-                    ) : (
-                      <span className="text-green-500/50">Permanent Access</span>
-                    )}
-                    <span className="text-[10px] mt-2">Created by: {u.createdBy || 'System'}</span>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* === INBOX TAB === */}
-        {activeTab === 'INBOX' && (
-          <div className="space-y-4">
-            <div className="flex items-center bg-zinc-900 p-2 rounded border border-zinc-800">
-              <Search className="w-4 h-4 text-zinc-500 ml-2" />
-              <input 
-                placeholder="Search requests..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="bg-transparent border-none outline-none text-white text-sm ml-2 w-full placeholder:text-zinc-600"
-              />
-            </div>
-
-            <div className="space-y-2">
-              {filteredRequests.length === 0 && <div className="text-zinc-600 text-center py-8">No matching requests.</div>}
-              {filteredRequests.map(req => (
+          {/* === INBOX TAB === */}
+          {activeTab === 'INBOX' && (
+            <div className="space-y-4 max-w-5xl mx-auto">
+              {requests.length === 0 && <div className="text-zinc-600 text-center py-12 border border-dashed border-zinc-800 rounded">No pending requests.</div>}
+              {requests.map(req => (
                 <div key={req.id} className={`bg-zinc-900 border p-4 rounded flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${req.status === 'PENDING' ? 'border-gold-900/30' : 'border-zinc-800 opacity-60'}`}>
                    <div>
                      <div className="flex items-center gap-2 mb-1">
                         <span className="text-gold-500 font-bold text-lg">{req.preferredUsername}</span>
                         <span className={`text-[10px] px-1.5 rounded uppercase font-bold ${req.status === 'PENDING' ? 'bg-blue-900 text-blue-300' : req.status === 'APPROVED' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>{req.status}</span>
-                        <span className="text-zinc-600 font-mono text-xs">#{req.id}</span>
                      </div>
-                     <div className="text-xs text-zinc-400 flex flex-wrap gap-x-4 gap-y-1">
+                     <div className="text-xs text-zinc-400 flex flex-wrap gap-x-4">
                        <span>{req.firstName} {req.lastName}</span>
-                       <span>@{req.tiktokHandle}</span>
                        <span>{req.phone}</span>
-                       <span className="text-zinc-600">{new Date(req.timestamp).toLocaleDateString()}</span>
                      </div>
                    </div>
                    
                    {req.status === 'PENDING' && (
                      <div className="flex gap-2">
-                       <button onClick={() => handleReject(req.id)} className="p-2 bg-zinc-950 border border-zinc-800 hover:border-red-500 hover:text-red-500 rounded"><X className="w-4 h-4" /></button>
-                       <button onClick={() => handleApprove(req.id)} className="px-4 py-2 bg-gold-600 hover:bg-gold-500 text-black font-bold rounded text-xs flex items-center gap-2">
-                         <Check className="w-4 h-4" /> Approve & Notify
+                       <button onClick={() => authService.rejectRequest(currentUser, req.id).then(refreshData)} className="p-2 bg-zinc-950 border border-zinc-800 hover:border-red-500 hover:text-red-500 rounded"><X className="w-4 h-4" /></button>
+                       <button onClick={() => authService.approveRequest(currentUser, req.id, undefined, ['EMAIL', 'SMS']).then(refreshData)} className="px-4 py-2 bg-gold-600 hover:bg-gold-500 text-black font-bold rounded text-xs flex items-center gap-2">
+                         <Check className="w-4 h-4" /> Approve
                        </button>
-                     </div>
-                   )}
-                   {req.status === 'APPROVED' && (
-                     <div className="text-[10px] text-zinc-500 flex gap-2">
-                        <span className={req.emailDeliveryStatus === 'SENT' ? 'text-green-500' : 'text-red-500'}>Email: {req.emailDeliveryStatus}</span>
-                        <span className={req.smsDeliveryStatus === 'SENT' ? 'text-green-500' : 'text-red-500'}>SMS: {req.smsDeliveryStatus}</span>
                      </div>
                    )}
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* === AUDIT TAB === */}
-        {activeTab === 'AUDIT' && (
-          <div className="bg-zinc-900 rounded border border-zinc-800 overflow-hidden">
-             <table className="w-full text-left text-xs font-mono text-zinc-400">
-               <thead className="bg-black text-zinc-500 uppercase">
-                 <tr>
-                   <th className="p-3 border-b border-zinc-800">Time</th>
-                   <th className="p-3 border-b border-zinc-800">Actor</th>
-                   <th className="p-3 border-b border-zinc-800">Action</th>
-                   <th className="p-3 border-b border-zinc-800">Details</th>
-                 </tr>
-               </thead>
-               <tbody className="divide-y divide-zinc-800">
-                 {auditLogs.map(log => (
-                   <tr key={log.id} className="hover:bg-zinc-800/50">
-                     <td className="p-3 whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
-                     <td className="p-3 text-gold-500">{log.actorId}</td>
-                     <td className="p-3 font-bold">{log.action}</td>
-                     <td className="p-3 text-zinc-300">{log.details}</td>
+          {/* === AUDIT TAB === */}
+          {activeTab === 'AUDIT' && (
+             <div className="bg-zinc-900 rounded border border-zinc-800 overflow-hidden max-w-7xl mx-auto">
+               <table className="w-full text-left text-xs font-mono text-zinc-400">
+                 <thead className="bg-black text-zinc-500 uppercase sticky top-0">
+                   <tr>
+                     <th className="p-3 border-b border-zinc-800">Time</th>
+                     <th className="p-3 border-b border-zinc-800">Actor</th>
+                     <th className="p-3 border-b border-zinc-800">Action</th>
+                     <th className="p-3 border-b border-zinc-800">Details</th>
                    </tr>
-                 ))}
-               </tbody>
-             </table>
+                 </thead>
+                 <tbody className="divide-y divide-zinc-800">
+                   {auditLogs.map(log => (
+                     <tr key={log.id} className="hover:bg-zinc-800/50">
+                       <td className="p-3 whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
+                       <td className="p-3 text-gold-500">{log.actorId} <span className="opacity-50 text-[10px]">({log.actorRole})</span></td>
+                       <td className="p-3 font-bold">{log.action}</td>
+                       <td className="p-3 text-zinc-300">{log.details}</td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+            </div>
+          )}
+
+        </div>
+
+        {/* --- MODALS --- */}
+
+        {/* View User Modal */}
+        {viewUser && (
+          <div className="absolute inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-xl p-6 shadow-2xl">
+              <div className="flex justify-between items-start mb-6">
+                 <div>
+                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                     {viewUser.username}
+                     <span className="text-[10px] bg-zinc-800 px-2 py-1 rounded text-zinc-400 uppercase">{viewUser.role}</span>
+                   </h3>
+                   <p className="text-xs text-zinc-500 font-mono mt-1">ID: {viewUser.id}</p>
+                 </div>
+                 <button onClick={() => setViewUser(null)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5"/></button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="bg-black p-3 rounded border border-zinc-800">
+                   <p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">Full Name</p>
+                   <p className="text-white">{viewUser.profile.firstName} {viewUser.profile.lastName}</p>
+                </div>
+                <div className="bg-black p-3 rounded border border-zinc-800">
+                   <p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">TikTok</p>
+                   <p className="text-white">{viewUser.profile.tiktokHandle || 'N/A'}</p>
+                </div>
+                <div className="bg-black p-3 rounded border border-zinc-800">
+                   <p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">Source</p>
+                   <p className="text-white">{viewUser.profile.source}</p>
+                </div>
+                <div className="bg-black p-3 rounded border border-zinc-800">
+                   <p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">Status</p>
+                   <p className={viewUser.status === 'ACTIVE' ? 'text-green-500' : 'text-red-500'}>{viewUser.status}</p>
+                </div>
+              </div>
+
+              <div className="space-y-2 mb-6">
+                <div className="flex justify-between text-xs border-b border-zinc-800 pb-2">
+                  <span className="text-zinc-500">Email</span>
+                  <span className="text-white">{viewUser.email || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between text-xs border-b border-zinc-800 pb-2">
+                  <span className="text-zinc-500">Phone</span>
+                  <span className="text-white">{viewUser.phone || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between text-xs border-b border-zinc-800 pb-2">
+                  <span className="text-zinc-500">Created</span>
+                  <span className="text-white">{new Date(viewUser.createdAt).toLocaleDateString()}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button onClick={() => setViewUser(null)} className="bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded text-xs font-bold">Close</button>
+              </div>
+            </div>
           </div>
         )}
 
+        {/* Confirmation Modal */}
+        {confirmAction && (
+          <div className="absolute inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+            <div className="w-full max-w-sm bg-zinc-900 border border-red-900 rounded-xl p-6 shadow-2xl text-center">
+               <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+               <h3 className="text-lg font-bold text-white mb-2">Confirm Action</h3>
+               <p className="text-zinc-400 text-sm mb-6">
+                 Are you sure you want to <strong>{confirmAction.type}</strong> access for <strong>{confirmAction.username}</strong>?
+               </p>
+               <div className="flex gap-3 justify-center">
+                 <button onClick={() => setConfirmAction(null)} className="px-4 py-2 rounded text-zinc-400 hover:text-white text-sm">Cancel</button>
+                 <button onClick={executeAction} className="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded text-sm font-bold">Confirm</button>
+               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Credential Modal (Always on top if active) */}
+        {credentialModal && (
+          <div className="absolute inset-0 z-50 bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="w-full max-w-md bg-zinc-900 border border-gold-500 rounded-xl p-6 shadow-2xl">
+              <div className="flex items-center justify-center mb-6">
+                <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center border border-green-500 text-green-500">
+                  <Key className="w-6 h-6" />
+                </div>
+              </div>
+              <h2 className="text-xl font-bold text-center text-white mb-2">Credentials Generated</h2>
+              <p className="text-center text-zinc-400 text-xs mb-6">
+                This token is visible ONLY ONCE. Copy or send it now.
+              </p>
+
+              <div className="bg-black p-4 rounded border border-zinc-800 mb-6 space-y-3">
+                <div className="flex justify-between items-center text-xs text-zinc-500 uppercase font-bold">
+                  <span>Username</span>
+                </div>
+                <div className="text-white font-mono text-lg">{credentialModal.username}</div>
+                <div className="h-px bg-zinc-800" />
+                <div className="flex justify-between items-center text-xs text-zinc-500 uppercase font-bold">
+                  <span>Access Token</span>
+                  <button onClick={() => { navigator.clipboard.writeText(credentialModal.token); addToast('success', 'Token copied'); }} className="text-gold-500 hover:text-white flex items-center gap-1">
+                    <Copy className="w-3 h-3" /> COPY
+                  </button>
+                </div>
+                <div className="text-gold-500 font-mono text-lg break-all">{credentialModal.token}</div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                 <button 
+                    onClick={() => handleSendMessage(credentialModal.username, 'EMAIL', `Your new token: ${credentialModal.token}`)}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded text-xs font-bold flex items-center justify-center gap-2 border border-zinc-700"
+                 >
+                   <Mail className="w-4 h-4" /> Email Token
+                 </button>
+                 <button 
+                    onClick={() => handleSendMessage(credentialModal.username, 'SMS', `Your new token: ${credentialModal.token}`)}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded text-xs font-bold flex items-center justify-center gap-2 border border-zinc-700"
+                 >
+                   <MessageSquare className="w-4 h-4" /> Text Token
+                 </button>
+              </div>
+
+              <button 
+                onClick={() => setCredentialModal(null)} 
+                className="w-full bg-gold-600 hover:bg-gold-500 text-black font-bold py-3 rounded text-sm"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

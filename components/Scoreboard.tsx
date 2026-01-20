@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { User, Plus, Minus, Volume2, VolumeX, Settings } from 'lucide-react';
+import { Plus, Minus } from 'lucide-react';
 import { Player } from '../types';
-import { soundService } from '../services/soundService';
 
 interface Props {
   players: Player[];
@@ -13,10 +12,9 @@ interface Props {
 }
 
 export const Scoreboard: React.FC<Props> = ({ 
-  players, selectedPlayerId, onAddPlayer, onUpdateScore, onSelectPlayer, gameActive 
+  players, selectedPlayerId, onAddPlayer, onUpdateScore, onSelectPlayer 
 }) => {
   const [newName, setNewName] = useState('');
-  const [muted, setMuted] = useState(false);
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,25 +24,16 @@ export const Scoreboard: React.FC<Props> = ({
     }
   };
 
-  const toggleMute = () => {
-    const newVal = !muted;
-    setMuted(newVal);
-    soundService.setMute(newVal);
-  };
-
   return (
-    <div className="h-full flex flex-col border-l border-gold-900/30 bg-black/80 backdrop-blur-sm w-full md:w-72 lg:w-80 shadow-[-10px_0_30px_rgba(0,0,0,0.5)] z-20">
+    <div className="h-full flex flex-col border-t md:border-t-0 md:border-l border-gold-900/30 bg-black/95 w-full md:w-64 lg:w-72 shadow-2xl z-20">
       
-      {/* Header & Settings */}
-      <div className="p-4 border-b border-gold-900/30 flex items-center justify-between bg-zinc-950">
-        <h3 className="font-serif text-gold-500 font-bold tracking-widest text-sm">CONTESTANTS ({players.length})</h3>
-        <button onClick={toggleMute} className="text-zinc-500 hover:text-gold-500 transition-colors">
-          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-        </button>
+      {/* Header */}
+      <div className="flex-none p-3 border-b border-gold-900/30 bg-zinc-900/50 flex items-center justify-between">
+        <h3 className="font-serif text-gold-500 font-bold tracking-widest text-xs">PLAYERS ({players.length})</h3>
       </div>
 
       {/* Players List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
         {players.map(p => {
           const isSelected = p.id === selectedPlayerId;
           return (
@@ -52,53 +41,53 @@ export const Scoreboard: React.FC<Props> = ({
               key={p.id} 
               onClick={() => onSelectPlayer(p.id)}
               className={`
-                relative p-3 rounded-lg border transition-all duration-200 cursor-pointer group flex flex-col
+                relative p-2 rounded border transition-all duration-200 cursor-pointer group flex flex-col select-none
                 ${isSelected 
-                  ? 'bg-gold-900/20 border-gold-500 shadow-[0_0_15px_rgba(255,215,0,0.1)] scale-[1.02]' 
-                  : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-600'}
+                  ? 'bg-gold-900/20 border-gold-500 shadow-[0_0_10px_rgba(255,215,0,0.1)]' 
+                  : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600'}
               `}
             >
-              <div className="flex justify-between items-center mb-2">
-                <span className={`font-bold truncate pr-2 ${isSelected ? 'text-white' : 'text-zinc-400'}`}>{p.name}</span>
-                <span className={`text-2xl font-mono font-black ${isSelected ? 'text-gold-400' : 'text-zinc-600'}`}>
+              <div className="flex justify-between items-center mb-1">
+                <span className={`font-bold truncate pr-2 text-sm max-w-[60%] ${isSelected ? 'text-white' : 'text-zinc-400'}`}>{p.name}</span>
+                <span className={`font-mono font-black text-lg ${isSelected ? 'text-gold-400' : 'text-zinc-600'}`}>
                   {p.score}
                 </span>
               </div>
               
               {/* Quick Actions */}
-              <div className="flex gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
+              <div className="flex gap-1 h-6">
                  <button 
                    onClick={(e) => { e.stopPropagation(); onUpdateScore(p.id, -100); }} 
-                   className="flex-1 bg-zinc-950 border border-zinc-800 text-red-500 hover:border-red-500 hover:bg-red-900/20 rounded py-1 flex justify-center"
+                   className="flex-1 bg-zinc-950/80 border border-zinc-800 text-red-500 hover:border-red-500 hover:bg-red-900/20 rounded flex items-center justify-center transition-colors"
                  >
                    <Minus className="w-3 h-3" />
                  </button>
                  <button 
                    onClick={(e) => { e.stopPropagation(); onUpdateScore(p.id, 100); }} 
-                   className="flex-1 bg-zinc-950 border border-zinc-800 text-green-500 hover:border-green-500 hover:bg-green-900/20 rounded py-1 flex justify-center"
+                   className="flex-1 bg-zinc-950/80 border border-zinc-800 text-green-500 hover:border-green-500 hover:bg-green-900/20 rounded flex items-center justify-center transition-colors"
                  >
                    <Plus className="w-3 h-3" />
                  </button>
               </div>
 
-              {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-gold-500 rounded-l-lg animate-pulse" />}
+              {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-gold-500 rounded-l animate-pulse" />}
             </div>
           );
         })}
-        {players.length === 0 && <div className="text-center text-zinc-600 text-xs py-8 italic uppercase tracking-wider">Awaiting Players...</div>}
+        {players.length === 0 && <div className="text-center text-zinc-700 text-[10px] py-4 italic uppercase tracking-wider">No Contestants</div>}
       </div>
 
       {/* Add Player Form */}
-      <form onSubmit={handleAdd} className="p-3 border-t border-gold-900/30 bg-zinc-950">
-        <div className="flex gap-2">
+      <form onSubmit={handleAdd} className="flex-none p-2 border-t border-gold-900/30 bg-zinc-900/50">
+        <div className="flex gap-2 h-8">
           <input 
             type="text" 
             value={newName} 
             onChange={(e) => setNewName(e.target.value)} 
-            placeholder="NEW PLAYER NAME" 
-            className="flex-1 bg-black border border-zinc-800 rounded px-3 py-2 text-xs text-white focus:border-gold-500 outline-none uppercase tracking-wide placeholder:text-zinc-700" 
+            placeholder="ADD NAME" 
+            className="flex-1 bg-black border border-zinc-800 rounded px-2 text-[10px] text-white focus:border-gold-500 outline-none uppercase tracking-wide placeholder:text-zinc-700" 
           />
-          <button type="submit" className="bg-gold-600 hover:bg-gold-500 text-black p-2 rounded transition-colors"><Plus className="w-4 h-4" /></button>
+          <button type="submit" className="bg-gold-600 hover:bg-gold-500 text-black px-3 rounded transition-colors flex items-center justify-center"><Plus className="w-4 h-4" /></button>
         </div>
       </form>
     </div>

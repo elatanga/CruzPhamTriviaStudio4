@@ -61,4 +61,62 @@ describe('App Robustness', () => {
     await expect(authService.createUser('admin', { username: 'testuser' }, 'PRODUCER'))
       .rejects.toThrow('Username taken');
   });
+
+  test('Persists Request details to User Profile on approval', async () => {
+    // Setup
+    await authService.bootstrapMasterAdmin('admin');
+    const req = await authService.submitTokenRequest({
+      firstName: 'Jane',
+      lastName: 'Doe',
+      phone: '123',
+      tiktokHandle: 'janed',
+      preferredUsername: 'jane_prod'
+    });
+
+    // Approve
+    await authService.approveRequest('admin', req.id);
+
+    // Verify User
+    const users = authService.getAllUsers();
+    const user = users.find(u => u.username === 'jane_prod');
+    expect(user).toBeDefined();
+    expect(user?.profile.firstName).toBe('Jane');
+    expect(user?.profile.source).toBe('REQUEST_APPROVAL');
+    expect(user?.profile.originalRequestId).toBe(req.id);
+  });
+
+  test('Token Rotation invalidates old token', async () => {
+    // Setup
+    await authService.bootstrapMasterAdmin('admin');
+    const token1 = await authService.createUser('admin', { username: 'rotator' }, 'PRODUCER');
+
+    // Verify Login
+    const login1 = await authService.login('rotator', token1);
+    expect(login1.success).toBe(true);
+
+    // Rotate
+    const token2 = await authService.refreshToken('admin', 'rotator');
+    expect(token1).not.toBe(token2);
+
+    // Verify Old Token Invalid
+    const loginOld = await authService.login('rotator', token1);
+    expect(loginOld.success).toBe(false);
+
+    // Verify New Token Valid
+    const loginNew = await authService.login('rotator', token2);
+    expect(loginNew.success).toBe(true);
+  });
+
+  test('Revoke Access blocks login immediately', async () => {
+    await authService.bootstrapMasterAdmin('admin');
+    const token = await authService.createUser('admin', { username: 'bad_actor' }, 'PRODUCER');
+    
+    // Revoke
+    await authService.toggleAccess('admin', 'bad_actor', true);
+    
+    // Try Login
+    const login = await authService.login('bad_actor', token);
+    expect(login.success).toBe(false);
+    expect(login.code).toBe('ERR_FORBIDDEN');
+  });
 });

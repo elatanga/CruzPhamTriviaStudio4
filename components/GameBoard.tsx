@@ -8,25 +8,35 @@ interface Props {
 }
 
 export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion }) => {
+  // Determine dynamic grid dimensions
+  const colCount = categories.length;
+  const rowCount = categories[0]?.questions.length || 5; 
+
   return (
-    <div className="h-full w-full overflow-auto flex items-center justify-center p-4">
+    <div className="h-full w-full flex flex-col p-2 md:p-4 bg-zinc-950/50">
+      {/* The Board Grid: Fits exactly into container using 1fr for all tracks */}
       <div 
-        className="grid gap-3 md:gap-4 w-full max-w-7xl h-full max-h-[85vh] content-center"
-        style={{ gridTemplateColumns: `repeat(${categories.length}, minmax(150px, 1fr))` }}
+        className="flex-1 grid gap-1.5 md:gap-3 w-full h-full min-h-0 min-w-0"
+        style={{ 
+          gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
+          gridTemplateRows: `auto repeat(${rowCount}, minmax(0, 1fr))` // Header row auto-sized, questions share remaining space equally
+        }}
       >
-        {/* Headers */}
+        {/* Category Headers */}
         {categories.map((cat) => (
-          <div key={cat.id} className="bg-gold-600 flex items-center justify-center p-4 rounded-lg shadow-lg border-b-4 border-gold-900 text-center relative overflow-hidden">
+          <div key={cat.id} className="bg-gold-600 flex items-center justify-center p-2 rounded shadow-lg border-b-2 md:border-b-4 border-gold-800 text-center relative overflow-hidden group min-h-0">
              <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
-             <h3 className="text-black font-black uppercase text-sm md:text-lg lg:text-xl tracking-tight leading-none break-words line-clamp-2 drop-shadow-sm">
+             <h3 
+                className="text-black font-black uppercase leading-none break-words line-clamp-2 drop-shadow-sm w-full" 
+                style={{ fontSize: 'clamp(0.6rem, 1.2vw, 1.25rem)' }} // Responsive typography
+             >
                {cat.title}
              </h3>
           </div>
         ))}
 
-        {/* Grid Cells (Row Major logic needs to be transposed for Column Major display or mapped by index) */}
-        {/* We need rows. Max rows? Let's assume uniform rows for visual grid based on the first category for now or map simply */}
-        {Array.from({ length: Math.max(...categories.map(c => c.questions.length)) }).map((_, rowIdx) => (
+        {/* Question Cells - Row-major iteration mapped to Grid */}
+        {Array.from({ length: rowCount }).map((_, rowIdx) => (
            <React.Fragment key={rowIdx}>
              {categories.map((cat) => {
                const q = cat.questions[rowIdx];
@@ -43,21 +53,24 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion }) => 
                      onSelectQuestion(cat.id, q.id);
                    }} 
                    className={`
-                     aspect-[16/9] md:aspect-[4/3] flex items-center justify-center rounded-lg border-2 transition-all duration-300 relative overflow-hidden group
+                     w-full h-full flex items-center justify-center rounded border transition-all duration-200 relative overflow-hidden group min-h-0 min-w-0
                      ${q.isVoided 
-                        ? 'bg-zinc-950 border-zinc-900 opacity-50 cursor-not-allowed' 
+                        ? 'bg-zinc-900 border-zinc-900 opacity-40 cursor-not-allowed' 
                         : q.isAnswered 
-                          ? 'bg-black border-zinc-800 opacity-40 cursor-default' 
-                          : 'bg-zinc-900/80 border-gold-600/30 text-gold-400 hover:bg-gold-600 hover:text-black hover:scale-105 hover:shadow-[0_0_25px_rgba(255,215,0,0.5)] cursor-pointer'
+                          ? 'bg-black border-zinc-900 opacity-25 cursor-default' 
+                          : 'bg-zinc-900/90 border-gold-600/20 text-gold-400 hover:bg-gold-600 hover:text-black hover:border-gold-500 hover:scale-[1.02] hover:shadow-[0_0_15px_rgba(255,215,0,0.3)] hover:z-10 cursor-pointer shadow-sm'
                      }
                    `}
                  >
                    {q.isVoided ? (
-                     <span className="font-mono text-sm uppercase text-red-900 font-black tracking-widest rotate-[-15deg]">VOID</span>
+                     <span className="font-mono text-red-800 font-black tracking-widest rotate-[-15deg]" style={{ fontSize: 'clamp(0.5rem, 1vw, 1rem)' }}>VOID</span>
                    ) : q.isAnswered ? (
-                     <span className="font-mono text-3xl font-bold opacity-10 text-zinc-500">---</span> 
+                     <span className="font-mono font-bold text-zinc-700 opacity-50" style={{ fontSize: 'clamp(1rem, 2vw, 2rem)' }}>---</span> 
                    ) : (
-                     <span className="font-serif text-3xl md:text-4xl lg:text-5xl font-bold shadow-black drop-shadow-lg group-hover:scale-110 transition-transform">
+                     <span 
+                        className="font-serif font-bold group-hover:scale-110 transition-transform shadow-black drop-shadow-lg"
+                        style={{ fontSize: 'clamp(1rem, 2.5vw, 3rem)' }} // Points smaller than max header possibility, scaled
+                     >
                        {q.points}
                      </span>
                    )}
