@@ -1,7 +1,8 @@
+
 import React, { useState } from 'react';
-import { X, Check, Copy, Loader2, ArrowRight, ShieldCheck } from 'lucide-react';
+import { X, Check, Copy, Loader2, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
 import { authService } from '../services/authService';
-import { TokenRequest } from '../types';
+import { TokenRequest, AppError } from '../types';
 
 interface Props {
   onClose: () => void;
@@ -11,6 +12,7 @@ interface Props {
 export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
   const [step, setStep] = useState<'FORM' | 'SUCCESS'>('FORM');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [reqId, setReqId] = useState('');
   
   // Form State
@@ -22,22 +24,15 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
     phone: ''
   });
 
-  const normalizePhone = (value: string) => {
-    // Basic E.164 normalization logic for UI display
-    // Remove non-digits
-    const digits = value.replace(/\D/g, '');
-    // If it starts with 1 (USA), add +, else just add + if user didn't
-    if (!value.startsWith('+')) return `+${digits}`;
-    return value;
-  };
-
   const handleChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    if (error) setError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
     try {
       const result = await authService.submitTokenRequest({
@@ -45,13 +40,18 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
         lastName: formData.lastName,
         tiktokHandle: formData.tiktok,
         preferredUsername: formData.username,
-        phoneE164: normalizePhone(formData.phone)
+        phoneE164: formData.phone
       });
       setReqId(result.id);
       setStep('SUCCESS');
-      onSuccess(); // Triggers parent toast
-    } catch (error) {
-      console.error(error);
+      onSuccess(); 
+    } catch (err: any) {
+      if (err instanceof AppError && err.code === 'ERR_VALIDATION') {
+        setError(err.message);
+      } else {
+        setError('Submission failed. Please try again.');
+        console.error(err);
+      }
     } finally {
       setLoading(false);
     }
@@ -88,6 +88,13 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <h2 className="text-2xl font-serif text-white mb-1">Request Access Token</h2>
               <p className="text-sm text-zinc-400 mb-6">Complete the profile below. Admin verification required.</p>
+              
+              {error && (
+                <div className="bg-red-900/30 border border-red-500/50 p-3 rounded text-red-200 text-xs flex items-center gap-2 mb-4 animate-in slide-in-from-top-1">
+                  <AlertCircle className="w-4 h-4 flex-none" />
+                  <span>{error}</span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -121,7 +128,7 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
                 <label className="text-xs uppercase text-gold-600 font-bold">Phone Number</label>
                 <input required type="tel" placeholder="+12223334444" className="w-full bg-black border border-zinc-700 p-2 text-white rounded focus:border-gold-500 outline-none" 
                    value={formData.phone} onChange={e => handleChange('phone', e.target.value)} />
-                <p className="text-[10px] text-zinc-500">Format: E.164 (e.g. +14155552671)</p>
+                <p className="text-[10px] text-zinc-500">Must be E.164 compliant (e.g. +14155552671)</p>
               </div>
 
               <button type="submit" disabled={loading} className="w-full mt-6 bg-gold-600 hover:bg-gold-500 text-black font-bold py-3 rounded flex items-center justify-center gap-2 transition-all">
@@ -136,8 +143,11 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
               
               <div>
                 <h2 className="text-2xl font-serif text-white mb-2">Request Received</h2>
-                <p className="text-zinc-400 text-sm max-w-xs mx-auto">
-                  Your profile has been logged. Payment is required to generate your secure token.
+                <p className="text-zinc-400 text-sm max-w-xs mx-auto mb-2">
+                  Your profile has been securely logged.
+                </p>
+                <p className="text-gold-500 font-bold text-sm bg-gold-900/20 px-3 py-1 rounded inline-block border border-gold-900/50">
+                  Payment Verification Pending
                 </p>
               </div>
 
@@ -151,9 +161,13 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
                 </div>
               </div>
 
-              <div className="bg-blue-900/20 border-l-2 border-blue-500 p-3 text-left w-full">
-                <h4 className="text-blue-200 text-sm font-bold mb-1">What happens next?</h4>
-                <p className="text-blue-300/80 text-xs">An administrator will contact you at {formData.phone} or via TikTok regarding payment and account activation.</p>
+              <div className="bg-blue-900/20 border-l-2 border-blue-500 p-3 text-left w-full text-xs text-blue-300 space-y-2">
+                <p className="font-bold text-blue-200">Next Steps:</p>
+                <ul className="list-disc pl-4 space-y-1 opacity-80">
+                  <li>Our team will verify your identity via TikTok/SMS.</li>
+                  <li>Once payment is confirmed, your token will be sent to <strong>{formData.phone}</strong>.</li>
+                  <li>Expect contact within 24 hours.</li>
+                </ul>
               </div>
 
               <button onClick={onClose} className="text-zinc-400 hover:text-white text-sm underline">

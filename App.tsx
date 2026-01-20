@@ -21,7 +21,7 @@ import { Monitor, Grid, Shield, Copy, Loader2 } from 'lucide-react';
 const App: React.FC = () => {
   // App Boot State
   const [isConfigured, setIsConfigured] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false); // Controls rendering of main UI vs Loader
+  const [authChecked, setAuthChecked] = useState(false); 
   
   const [bootstrapToken, setBootstrapToken] = useState<string | null>(null);
 
@@ -30,8 +30,11 @@ const App: React.FC = () => {
 
   // --- VIEW STATE ---
   const [viewMode, setViewMode] = useState<'BOARD' | 'DIRECTOR' | 'ADMIN'>('BOARD');
-  const [isPopoutView, setIsPopoutView] = useState(false); // Am I the popout?
-  const [isDirectorPoppedOut, setIsDirectorPoppedOut] = useState(false); // Is there a popout open elsewhere?
+  const [isPopoutView, setIsPopoutView] = useState(false); 
+  const [isDirectorPoppedOut, setIsDirectorPoppedOut] = useState(false); 
+
+  // --- ADMIN NOTIFICATIONS ---
+  const [pendingRequests, setPendingRequests] = useState(0);
 
   // --- GAME STATE ---
   const [gameState, setGameState] = useState<GameState>({
@@ -74,6 +77,27 @@ const App: React.FC = () => {
       localStorage.setItem('cruzpham_ui_state', JSON.stringify(uiState));
     }
   }, [activeShow, viewMode, session]);
+
+  // Admin Polling
+  useEffect(() => {
+    let interval: number;
+    if (session?.role === 'ADMIN' || session?.role === 'MASTER_ADMIN') {
+        const check = () => {
+            const reqs = authService.getRequests();
+            const pending = reqs.filter(r => r.status === 'PENDING').length;
+            setPendingRequests(prev => {
+                if (pending > prev) {
+                    soundService.playToast('info');
+                    addToast('info', 'New Access Request Received');
+                }
+                return pending;
+            });
+        };
+        check(); 
+        interval = window.setInterval(check, 30000); // Check every 30s
+    }
+    return () => clearInterval(interval);
+  }, [session]);
 
   useEffect(() => {
     // Check if I am a popout
@@ -232,7 +256,6 @@ const App: React.FC = () => {
     // Initialize Categories
     const initCategories = template.categories.map(cat => {
       // Logic to preserve or assign Double Or Nothing
-      // If template has specific assignments, use them. If none found in whole category (legacy), assign one.
       const hasDouble = cat.questions.some(q => q.isDoubleOrNothing);
       const luckyIndex = !hasDouble ? Math.floor(Math.random() * cat.questions.length) : -1;
 
@@ -243,13 +266,11 @@ const App: React.FC = () => {
           isAnswered: false,
           isRevealed: false,
           isVoided: false,
-          // Preserve if exists, else assign to lucky index
           isDoubleOrNothing: hasDouble ? (q.isDoubleOrNothing || false) : (idx === luckyIndex)
         }))
       };
     });
 
-    // Initialize Players (from template config if available)
     const initPlayers: Player[] = (template.config.playerNames || []).map(name => ({
       id: crypto.randomUUID(),
       name: name,
@@ -257,7 +278,6 @@ const App: React.FC = () => {
       color: '#ffffff'
     }));
 
-    // Fallback if no specific names but count exists (legacy templates support)
     if (initPlayers.length === 0 && template.config.playerCount > 0) {
       for (let i = 0; i < template.config.playerCount; i++) {
         initPlayers.push({
@@ -393,7 +413,7 @@ const App: React.FC = () => {
         <div className="max-w-md w-full p-8 border border-gold-600 rounded-2xl bg-zinc-900 text-center relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold-500 to-transparent animate-pulse" />
           <h1 className="text-3xl font-serif text-gold-500 mb-4">SYSTEM BOOTSTRAP</h1>
-          <p className="text-zinc-400 mb-8">No Master Admin detected.<br/>Initialize the system to begin.</p>
+          <p className="text-zinc-400 mb-8">No Master Admin detected.<br/>Setup Studio System to begin.</p>
           <button onClick={handleBootstrap} className="w-full bg-gold-600 text-black font-bold py-3 rounded uppercase tracking-wider hover:bg-gold-500 transition-all">
             Create Master Admin
           </button>
@@ -457,8 +477,13 @@ const App: React.FC = () => {
                <ShowSelection username={session.username} onSelectShow={setActiveShow} />
                {isAdmin && (
                  <div className="absolute bottom-4 right-4">
-                   <button onClick={() => setViewMode('ADMIN')} className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-500 hover:text-gold-500 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-full transition-all">
+                   <button onClick={() => setViewMode('ADMIN')} className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-500 hover:text-gold-500 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-full transition-all relative group">
                      <Shield className="w-3 h-3" /> Admin Console
+                     {pendingRequests > 0 && (
+                       <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-bounce shadow-lg shadow-red-500/50">
+                         {pendingRequests}
+                       </span>
+                     )}
                    </button>
                  </div>
                )}
@@ -489,9 +514,10 @@ const App: React.FC = () => {
                      {isAdmin && (
                        <button 
                          onClick={() => setViewMode('ADMIN')}
-                         className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all ${viewMode === 'ADMIN' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-zinc-500 hover:text-white'}`}
+                         className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all relative ${viewMode === 'ADMIN' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-zinc-500 hover:text-white'}`}
                        >
                          <Shield className="w-3 h-3" /> Admin
+                         {pendingRequests > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse border border-zinc-900" />}
                        </button>
                      )}
                    </div>

@@ -1,3 +1,4 @@
+
 import { User, Session, TokenRequest, AuthResponse, AuditLogEntry, UserRole, AppError, AuditAction, DeliveryLog, UserSource, UserProfile } from '../types';
 import { logger } from './logger';
 
@@ -10,15 +11,64 @@ const STORAGE_KEYS = {
 };
 
 // Rate Limiting Map: ActorID -> timestamps[]
-const rateLimits = new Map<string, number[]>();
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX = 10; // 10 requests per minute
+const userRateLimits = new Map<string, number[]>();
+const destinationRateLimits = new Map<string, number[]>();
 
-// --- CRYPTO HELPERS ---
+const USER_RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const USER_RATE_LIMIT_MAX = 10; 
+
+const DEST_RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const DEST_RATE_LIMIT_MAX = 3; // Max 3 messages per destination per minute
+
+// --- TOKEN & PHONE UTILS ---
+
+/**
+ * Normalizes token for comparison and hashing.
+ * Removes spaces, dashes, newlines to ensure "pk-123-456" works as "pk123456".
+ */
+function normalizeTokenInput(token: string): string {
+  if (!token) return '';
+  return token.trim().replace(/[\s-]/g, '');
+}
+
+/**
+ * Validates and formats phone number to E.164 strictly.
+ * Throws error if invalid.
+ */
+function validateAndNormalizePhone(phone: string): string {
+  // 1. Strip common separators
+  let cleaned = phone.replace(/[\s\-\(\)\.]/g, '');
+
+  // 2. Heuristic: If 10 digits (US standard without code), assume +1
+  if (/^[2-9]\d{9}$/.test(cleaned)) {
+    cleaned = '+1' + cleaned;
+  } 
+  // 3. Heuristic: If 11 digits starting with 1 (US with code but no +), add +
+  else if (/^1[2-9]\d{9}$/.test(cleaned)) {
+    cleaned = '+' + cleaned;
+  }
+  // 4. Ensure it starts with + if user omitted it but included country code
+  else if (!cleaned.startsWith('+')) {
+    cleaned = '+' + cleaned;
+  }
+
+  // 5. Strict E.164 Regex Check
+  // Pattern: "+" followed by 1-15 digits. 
+  // (In practice, country codes are 1-3 digits, total length rarely exceeds 15).
+  // We enforce at least a reasonable length (e.g. +1415...) -> min 8 chars
+  const e164Regex = /^\+[1-9]\d{7,14}$/;
+  
+  if (!e164Regex.test(cleaned)) {
+    throw new Error('Invalid E.164 format');
+  }
+
+  return cleaned;
+}
 
 async function hashToken(token: string): Promise<string> {
+  const normalized = normalizeTokenInput(token);
   const encoder = new TextEncoder();
-  const data = encoder.encode(token);
+  const data = encoder.encode(normalized);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -27,26 +77,31 @@ async function hashToken(token: string): Promise<string> {
 // --- MOCK DELIVERY PROVIDERS ---
 
 async function simulateEmailProvider(to: string, subject: string, body: string): Promise<{ success: boolean; id?: string; error?: string }> {
-  // Simulate SendGrid/Mailgun
-  logger.info(`[EmailProvider] Dispatching to ${to}`, { subject }); 
-  await new Promise(r => setTimeout(r, 800)); // Network latency
+  logger.info('emailSendAttempt', { to });
+  await new Promise(r => setTimeout(r, 600)); // Network latency
   
-  if (Math.random() < 0.1) {
-    logger.error(`[EmailProvider] Failed to send to ${to}`);
+  // Simulate Secret Manager / API Key check
+  // if (!process.env.SENDGRID_API_KEY) ... 
+  
+  if (Math.random() < 0.05) { // 5% fail rate simulation
+    logger.error('emailSendFail', { to, reason: 'Provider Internal Error' });
     return { success: false, error: 'Provider Internal Error (Simulated)' };
   }
+  
+  logger.info('emailSendSuccess', { to });
   return { success: true, id: `sg_${Math.random().toString(36).substr(2, 12)}` };
 }
 
 async function simulateSmsProvider(to: string, message: string): Promise<{ success: boolean; id?: string; error?: string }> {
-  // Simulate Twilio
-  logger.info(`[SmsProvider] Dispatching to ${to}`); 
-  await new Promise(r => setTimeout(r, 800));
+  logger.info('smsSendAttempt', { to }); 
+  await new Promise(r => setTimeout(r, 600));
   
-  if (Math.random() < 0.1) {
-    logger.error(`[SmsProvider] Failed to send to ${to}`);
+  if (Math.random() < 0.05) { // 5% fail rate
+    logger.error('smsSendFail', { to, reason: 'Carrier Blocked' });
     return { success: false, error: 'Carrier Blocked (Simulated)' };
   }
+  
+  logger.info('smsSendSuccess', { to });
   return { success: true, id: `sm_${Math.random().toString(36).substr(2, 12)}` };
 }
 
@@ -59,17 +114,30 @@ class AuthService {
 
   // --- PRIVATE HELPERS ---
 
-  private checkRateLimit(actorId: string) {
+  private checkUserRateLimit(actorId: string) {
     const now = Date.now();
-    const timestamps = rateLimits.get(actorId) || [];
-    const recent = timestamps.filter(t => now - t < RATE_LIMIT_WINDOW);
+    const timestamps = userRateLimits.get(actorId) || [];
+    const recent = timestamps.filter(t => now - t < USER_RATE_LIMIT_WINDOW);
     
-    if (recent.length >= RATE_LIMIT_MAX) {
-      throw new AppError('ERR_RATE_LIMIT', 'Too many requests. Please slow down.', logger.getCorrelationId());
+    if (recent.length >= USER_RATE_LIMIT_MAX) {
+      throw new AppError('ERR_RATE_LIMIT', 'Too many requests from user. Please slow down.', logger.getCorrelationId());
     }
     
     recent.push(now);
-    rateLimits.set(actorId, recent);
+    userRateLimits.set(actorId, recent);
+  }
+
+  private checkDestinationRateLimit(destination: string) {
+    const now = Date.now();
+    const timestamps = destinationRateLimits.get(destination) || [];
+    const recent = timestamps.filter(t => now - t < DEST_RATE_LIMIT_WINDOW);
+    
+    if (recent.length >= DEST_RATE_LIMIT_MAX) {
+      throw new AppError('ERR_RATE_LIMIT', 'Too many messages to this destination. Try again later.', logger.getCorrelationId());
+    }
+    
+    recent.push(now);
+    destinationRateLimits.set(destination, recent);
   }
 
   private getUsers(): User[] {
@@ -87,7 +155,6 @@ class AuthService {
   getRequests(): TokenRequest[] {
     try { 
       const reqs = JSON.parse(localStorage.getItem(STORAGE_KEYS.REQUESTS) || '[]'); 
-      // Ensure sorting by createdAt desc
       return reqs.sort((a: TokenRequest, b: TokenRequest) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch { return []; }
   }
@@ -125,7 +192,6 @@ class AuthService {
 
   async getBootstrapStatus(): Promise<{ masterReady: boolean }> {
     logger.info('bootstrapStatusCheck');
-    // Simulate network latency for server check
     await new Promise(r => setTimeout(r, 150));
     
     const raw = localStorage.getItem(STORAGE_KEYS.BOOTSTRAP);
@@ -144,7 +210,6 @@ class AuthService {
 
     const currentStatus = await this.getBootstrapStatus();
     if (currentStatus.masterReady) {
-      logger.warn('bootstrapBlockedAlreadyComplete');
       throw new AppError('ERR_BOOTSTRAP_COMPLETE', 'System already bootstrapped', logger.getCorrelationId());
     }
 
@@ -192,7 +257,7 @@ class AuthService {
     await new Promise(r => setTimeout(r, 400)); // Latency
 
     const users = this.getUsers();
-    const targetUser = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    const targetUser = users.find(u => u.username.toLowerCase() === username.trim().toLowerCase());
 
     if (!targetUser) {
       return { success: false, message: 'Invalid credentials.', code: 'ERR_INVALID_CREDENTIALS' };
@@ -242,34 +307,27 @@ class AuthService {
   }
 
   async restoreSession(sessionId: string): Promise<AuthResponse> {
-    logger.info('restoreAttempt', { sessionId });
-    
     const bsStatus = await this.getBootstrapStatus();
     if (!bsStatus.masterReady) {
-      logger.warn('restoreFail - System not bootstrapped');
       return { success: false, code: 'ERR_UNKNOWN' };
     }
 
     const sessions = this.getSessions();
     const session = sessions[sessionId];
     if (!session) {
-      logger.warn('restoreFail - Session not found', { sessionId });
       return { success: false, message: 'Session expired', code: 'ERR_SESSION_EXPIRED' };
     }
     
     const users = this.getUsers();
     const user = users.find(u => u.username === session.username);
     if (!user) {
-      logger.warn('restoreFail - User missing', { username: session.username });
       return { success: false, message: 'User invalid', code: 'ERR_INVALID_CREDENTIALS' };
     }
 
     if (user.status === 'REVOKED') {
-      logger.warn('restoreFail - User revoked', { username: session.username });
       return { success: false, message: 'Access revoked', code: 'ERR_FORBIDDEN' };
     }
 
-    logger.info('restoreSuccess', { username: session.username });
     return { success: true, session };
   }
 
@@ -280,7 +338,7 @@ class AuthService {
   }
 
   async createUser(actorUsername: string, userData: Partial<User> & { profile?: Partial<UserProfile> }, role: UserRole, durationMinutes?: number): Promise<string> {
-    this.checkRateLimit(actorUsername);
+    this.checkUserRateLimit(actorUsername);
     const users = this.getUsers();
     const actor = users.find(u => u.username === actorUsername);
     
@@ -289,7 +347,7 @@ class AuthService {
       throw new AppError('ERR_FORBIDDEN', 'Only Master Admin can create Admins', logger.getCorrelationId());
     }
 
-    if (users.find(u => u.username === userData.username)) {
+    if (users.find(u => u.username.toLowerCase() === userData.username?.toLowerCase())) {
       throw new AppError('ERR_FORBIDDEN', 'Username taken', logger.getCorrelationId());
     }
 
@@ -329,13 +387,12 @@ class AuthService {
     
     const actionType = role === 'ADMIN' ? 'ADMIN_CREATED' : 'USER_CREATED';
     await this.logAction(actor, actionType, `Created ${role} ${newUser.username}`, { role, expiresAt }, newUser.username);
-    await this.logAction(actor, 'TOKEN_ISSUED', 'Initial token generated', null, newUser.username);
 
     return rawToken;
   }
 
   async refreshToken(actorUsername: string, targetUsername: string): Promise<string> {
-    this.checkRateLimit(actorUsername);
+    this.checkUserRateLimit(actorUsername);
     const users = this.getUsers();
     const actor = users.find(u => u.username === actorUsername);
     const targetIdx = users.findIndex(u => u.username === targetUsername);
@@ -422,7 +479,8 @@ class AuthService {
   // --- DELIVERY SYSTEM ---
 
   async sendMessage(actorUsername: string, targetUsername: string, method: 'EMAIL' | 'SMS', content: string) {
-    this.checkRateLimit(actorUsername);
+    this.checkUserRateLimit(actorUsername);
+    
     const users = this.getUsers();
     const actor = users.find(u => u.username === actorUsername);
     const targetIdx = users.findIndex(u => u.username === targetUsername);
@@ -430,14 +488,20 @@ class AuthService {
     if (targetIdx === -1) throw new AppError('ERR_UNKNOWN', 'User not found', logger.getCorrelationId());
     const target = users[targetIdx];
 
+    const destination = method === 'EMAIL' ? target.email : target.phone;
+    if (!destination) {
+        throw new AppError('ERR_VALIDATION', `User has no ${method === 'EMAIL' ? 'email' : 'phone'} on file`, logger.getCorrelationId());
+    }
+
+    // Rate Limit Destination
+    this.checkDestinationRateLimit(destination);
+
     let result: { success: boolean; id?: string; error?: string };
     
     if (method === 'EMAIL') {
-      if (!target.email) throw new AppError('ERR_UNKNOWN', 'User has no email', logger.getCorrelationId());
-      result = await simulateEmailProvider(target.email, 'CRUZPHAM ACCESS', content);
+      result = await simulateEmailProvider(destination, 'CRUZPHAM ACCESS', content);
     } else {
-      if (!target.phone) throw new AppError('ERR_UNKNOWN', 'User has no phone', logger.getCorrelationId());
-      result = await simulateSmsProvider(target.phone, content);
+      result = await simulateSmsProvider(destination, content);
     }
 
     const log: DeliveryLog = {
@@ -460,15 +524,26 @@ class AuthService {
     return log;
   }
 
-  // --- REQUEST MANAGEMENT (PERSISTENT FIRST) ---
+  // --- REQUEST MANAGEMENT ---
   
   async submitTokenRequest(data: Omit<TokenRequest, 'id' | 'status' | 'createdAt' | 'updatedAt' | 'adminNotifyStatus' | 'userNotifyStatus' | 'adminNotifyError'>): Promise<TokenRequest> {
     const timestamp = new Date().toISOString();
     
-    // 1. Persist IMMEDIATELY to 'DB' (localStorage)
+    // Validate Phone strictly E.164
+    let e164: string;
+    try {
+      e164 = validateAndNormalizePhone(data.phoneE164);
+      logger.info('phoneNormalizeSuccess', { input: data.phoneE164, output: e164 });
+    } catch (e: any) {
+      logger.warn('phoneNormalizeFail', { input: data.phoneE164, error: e.message });
+      throw new AppError('ERR_VALIDATION', 'Please enter a valid phone number (include country code).', logger.getCorrelationId());
+    }
+
+    // 1. Persist IMMEDIATELY
     const newRequest: TokenRequest = {
       id: crypto.randomUUID().split('-')[0].toUpperCase(),
       ...data,
+      phoneE164: e164,
       status: 'PENDING',
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -484,7 +559,7 @@ class AuthService {
 
     await this.logAction('SYSTEM', 'REQUEST_SUBMITTED', `New request from ${data.firstName}`, null, newRequest.id);
 
-    // 2. Trigger Async Email Notification (Fire & Forget from client perspective, but tracked in status)
+    // 2. Trigger Async Email Notification
     this.notifyAdmins(newRequest.id).catch(err => {
         logger.error('Background notifyAdmins failed', err);
     });
@@ -495,7 +570,6 @@ class AuthService {
   async notifyAdmins(reqId: string) {
     logger.info('notifyAdminsAttempt', { reqId });
     
-    // Refresh state from DB
     const requests = this.getRequests();
     const idx = requests.findIndex(r => r.id === reqId);
     if (idx === -1) return;
@@ -504,7 +578,6 @@ class AuthService {
     const recipients = ['cruzphamnetwork@gmail.com', 'eldecoder@gmail.com'];
     
     try {
-        // Simulate SendGrid Batch Send
         const subject = `[ACTION REQUIRED] New Token Request: ${req.preferredUsername}`;
         const body = `User: ${req.firstName} ${req.lastName}\nTikTok: ${req.tiktokHandle}\nPhone: ${req.phoneE164}\n\nPlease review in Admin Console.`;
         
@@ -535,66 +608,73 @@ class AuthService {
       return this.notifyAdmins(reqId);
   }
 
-  async approveRequest(actorUsername: string, reqId: string, durationMinutes?: number, notifyMethods: ('EMAIL'|'SMS')[] = []): Promise<string> {
+  // APPROVAL WORKFLOW
+  async approveRequest(actorUsername: string, reqId: string, customUsername?: string): Promise<{ rawToken: string, user: User }> {
     const requests = this.getRequests();
     const reqIndex = requests.findIndex(r => r.id === reqId);
     if (reqIndex === -1) throw new AppError('ERR_UNKNOWN', 'Request not found', logger.getCorrelationId());
     const req = requests[reqIndex];
 
+    if (req.status === 'APPROVED') {
+       throw new AppError('ERR_UNKNOWN', 'Request already approved', logger.getCorrelationId());
+    }
+
+    const finalUsername = customUsername || req.preferredUsername;
+
+    // 1. Create User
     const rawToken = await this.createUser(actorUsername, {
-      username: req.preferredUsername,
-      email: `user_${reqId}@example.com`, // Simulated or req.email if available
+      username: finalUsername,
+      email: `user_${reqId}@example.com`,
       phone: req.phoneE164,
       profile: {
         firstName: req.firstName,
         lastName: req.lastName,
         tiktokHandle: req.tiktokHandle,
-        source: 'REQUEST_APPROVAL' as UserSource,
+        source: 'REQUEST_APPROVAL',
         originalRequestId: req.id
       }
-    }, 'PRODUCER', durationMinutes);
+    }, 'PRODUCER');
 
+    const users = this.getUsers();
+    const newUser = users.find(u => u.username === finalUsername)!;
+
+    // 2. Update Request Status & Link
     req.status = 'APPROVED';
     req.updatedAt = new Date().toISOString();
+    req.approvedAt = new Date().toISOString();
+    req.userId = newUser.id;
     
-    // User Notification Logic
-    const message = `Welcome to CruzPham Studios! Your access token is: ${rawToken}`;
-    const users = this.getUsers(); // Reload to get newly created user
-    const newUser = users.find(u => u.username === req.preferredUsername);
-    
+    // 3. User Notification
+    const message = `APPROVED. Welcome to CruzPham Studios. Token: ${rawToken} . Login at studio.cruzpham.com`;
     let notifySuccess = false;
 
-    if (newUser) {
-      if (notifyMethods.includes('EMAIL')) {
-        try { 
-            await this.sendMessage(actorUsername, newUser.username, 'EMAIL', message); 
-            notifySuccess = true;
-        } 
-        catch (e) { logger.warn('Approval email failed', e); }
-      }
-      if (notifyMethods.includes('SMS')) {
-        try { 
-            await this.sendMessage(actorUsername, newUser.username, 'SMS', message); 
-            notifySuccess = true;
-        } 
-        catch (e) { logger.warn('Approval SMS failed', e); }
+    if (req.phoneE164) {
+      try {
+        await this.sendMessage(actorUsername, newUser.username, 'SMS', message);
+        notifySuccess = true;
+      } catch (e) {
+        logger.warn('Approval SMS failed', e);
+        req.userNotifyError = 'SMS Failed';
       }
     }
     
     req.userNotifyStatus = notifySuccess ? 'SENT' : 'FAILED';
     requests[reqIndex] = req;
     this.saveRequests(requests);
-    await this.logAction(actorUsername, 'REQUEST_APPROVED', `Approved request ${reqId}`, null, newUser?.username);
+    
+    await this.logAction(actorUsername, 'REQUEST_APPROVED', `Approved ${reqId}. User ${finalUsername} created.`, null, newUser.id);
 
-    return rawToken;
+    return { rawToken, user: newUser };
   }
 
+  // REJECTION WORKFLOW
   async rejectRequest(actor: string, reqId: string) {
     const requests = this.getRequests();
     const req = requests.find(r => r.id === reqId);
     if (req) {
       req.status = 'REJECTED';
       req.updatedAt = new Date().toISOString();
+      req.rejectedAt = new Date().toISOString();
       this.saveRequests(requests);
       await this.logAction(actor, 'REQUEST_REJECTED', `Rejected request ${reqId}`);
     }

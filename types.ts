@@ -69,7 +69,8 @@ export type ErrorCode =
   | 'ERR_LIMIT_REACHED'
   | 'ERR_UNKNOWN'
   | 'ERR_SESSION_EXPIRED'
-  | 'ERR_BOOTSTRAP_COMPLETE';
+  | 'ERR_BOOTSTRAP_COMPLETE'
+  | 'ERR_VALIDATION';
 
 export class AppError extends Error {
   public code: ErrorCode;
@@ -116,7 +117,7 @@ export interface User {
   
   // Contact
   email?: string;
-  phone?: string;
+  phone?: string; // E.164
   
   // Detailed Profile
   profile: UserProfile;
@@ -148,8 +149,11 @@ export interface TokenRequest {
   phoneE164: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   
-  createdAt: string; // Server Timestamp
+  createdAt: string; 
   updatedAt: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  userId?: string; // Linked user after approval
 
   // Admin Notification (New Request Alert)
   adminNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
@@ -157,6 +161,7 @@ export interface TokenRequest {
 
   // User Notification (Approval/Rejection)
   userNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
+  userNotifyError?: string;
 }
 
 export interface AuthResponse {

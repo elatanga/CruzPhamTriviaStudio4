@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2 } from 'lucide-react';
+import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2, HelpCircle } from 'lucide-react';
 import { GameTemplate, Category, Question, Difficulty } from '../types';
 import { generateTriviaGame, generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { dataService } from '../services/dataService';
@@ -81,7 +82,6 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     soundService.playClick();
     try {
       // Enforce: Each category must have exactly one Double Or Nothing
-      // If none found (e.g. manual edit interference), assign one randomly.
       const validatedCategories = categories.map(cat => {
         if (cat.questions.some(q => q.isDoubleOrNothing)) return cat;
         const lucky = Math.floor(Math.random() * cat.questions.length);
@@ -124,10 +124,8 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     setIsAiLoading(true);
     try {
       const generatedCats = await generateTriviaGame(prompt, difficulty, categories.length, categories[0].questions.length);
-      // Replace content but try to maintain IDs where possible to be safe, though replacing state is cleaner
-      // We will trust the generatedCats structure matches the grid
       setCategories(generatedCats);
-      setConfig(prev => ({...prev, title: prompt})); // Auto update title to topic
+      setConfig(prev => ({...prev, title: prompt}));
       addToast('success', 'Board populated by AI.');
     } catch (e) {
       addToast('error', 'AI Generation failed.');
@@ -208,8 +206,9 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
               <input 
                 value={config.title} onChange={e => setConfig(p => ({...p, title: e.target.value}))}
                 className="w-full bg-black border border-zinc-700 p-3 rounded text-white focus:border-gold-500 outline-none"
-                placeholder="e.g. Science Night" autoFocus
+                placeholder="e.g. Science Night 2024" autoFocus
               />
+              <p className="text-[10px] text-zinc-500 mt-1">This will be the main topic for AI generation.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-8">
@@ -237,7 +236,9 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
               {/* Player Config */}
               <div className="space-y-4">
                 <div className="flex justify-between items-center border-b border-zinc-800 pb-1">
-                   <h3 className="text-xs uppercase text-zinc-400 font-bold">Contestants ({playerNames.length}/8)</h3>
+                   <h3 className="text-xs uppercase text-zinc-400 font-bold flex items-center gap-2">
+                     Contestants <span className="bg-zinc-800 text-zinc-500 px-1 rounded text-[10px]">{playerNames.length}/8</span>
+                   </h3>
                    {playerNames.length < 8 && (
                      <button onClick={() => { soundService.playClick(); setPlayerNames([...playerNames, `Player ${playerNames.length + 1}`])}} className="text-[10px] text-gold-500 hover:text-white flex items-center gap-1">
                        <Plus className="w-3 h-3" /> ADD
@@ -270,12 +271,12 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
             
             {/* AI Generator In Config */}
             <div className="bg-zinc-950 p-4 rounded border border-zinc-800">
-               <h3 className="text-xs uppercase text-gold-600 font-bold mb-2 flex items-center gap-2"><Wand2 className="w-3 h-3" /> Instant Start</h3>
-               <p className="text-[10px] text-zinc-500 mb-3">Skip manual setup and let AI generate the entire board structure and content.</p>
+               <h3 className="text-xs uppercase text-gold-600 font-bold mb-2 flex items-center gap-2"><Wand2 className="w-3 h-3" /> Magic Generator</h3>
+               <p className="text-[10px] text-zinc-500 mb-3">Skip manual entry and let AI build the entire board instantly.</p>
                <AiToolbar onGenerate={(prompt, diff) => {
                   soundService.playClick();
                   setConfig(p => ({...p, title: prompt}));
-                  // We need to initialize categories first then fill
+                  // Initialize structure then fill
                   const newCats = Array.from({ length: config.catCount }).map((_, cI) => ({
                     id: Math.random().toString(),
                     title: `Category ${cI + 1}`,
@@ -303,8 +304,8 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
 
           <div className="flex gap-3 mt-8 pt-4 border-t border-zinc-800 flex-none">
              <button onClick={() => { soundService.playClick(); onClose(); }} className="flex-1 py-3 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 text-sm">Cancel</button>
-             <button onClick={initBoard} disabled={!config.title || isAiLoading} className="flex-1 py-3 rounded bg-gold-600 text-black font-bold hover:bg-gold-500 disabled:opacity-50 text-sm flex items-center justify-center gap-2">
-               {isAiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Start Building'}
+             <button onClick={initBoard} disabled={!config.title || isAiLoading} className="flex-1 py-3 rounded bg-gold-600 text-black font-bold hover:bg-gold-500 disabled:opacity-50 text-sm flex items-center justify-center gap-2 uppercase tracking-wide">
+               {isAiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Template'}
              </button>
           </div>
         </div>
@@ -312,6 +313,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     );
   }
 
+  // ... (Rest of component remains mostly same, just checking button text consistency)
   return (
     <div className="fixed inset-0 z-40 bg-black flex flex-col animate-in fade-in duration-200">
       {/* HEADER */}
@@ -389,7 +391,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                
                <div className="space-y-4">
                  <div>
-                   <label className="text-xs uppercase text-zinc-500 font-bold">Question</label>
+                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">Question <HelpCircle className="w-3 h-3 cursor-help" title="The text displayed to the host/players" /></label>
                    <textarea 
                      id="edit-q-text"
                      defaultValue={q.text}
@@ -397,7 +399,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                    />
                  </div>
                  <div>
-                   <label className="text-xs uppercase text-zinc-500 font-bold">Answer</label>
+                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">Answer <HelpCircle className="w-3 h-3 cursor-help" title="Hidden until revealed by host" /></label>
                    <textarea 
                      id="edit-q-answer"
                      defaultValue={q.answer}
@@ -411,8 +413,6 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                       defaultChecked={q.isDoubleOrNothing}
                       onChange={(e) => {
                          soundService.playClick();
-                         // Manually toggling double means we might have 2 or 0 in category. 
-                         // handleSave will fix 0, but 2 is allowed if manual.
                          const newCats = [...categories];
                          newCats[cIdx].questions[qIdx].isDoubleOrNothing = e.target.checked;
                          setCategories(newCats);
@@ -449,7 +449,6 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   );
 };
 
-// Sub-component for AI Toolbar
 const AiToolbar: React.FC<{ onGenerate: (p: string, d: Difficulty) => void }> = ({ onGenerate }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [prompt, setPrompt] = useState('');

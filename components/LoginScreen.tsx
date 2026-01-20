@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Lock, ArrowRight, Loader2, Key } from 'lucide-react';
+import { Lock, ArrowRight, Loader2, Key, HelpCircle } from 'lucide-react';
 import { authService } from '../services/authService';
 import { TokenRequestModal } from './TokenRequestModal';
 import { Session } from '../types';
@@ -25,7 +25,6 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess, addToast }) => {
       const result = await authService.login(username, token);
       if (result.success && result.session) {
         onLoginSuccess(result.session);
-        // Toast is handled by parent or we can do it here
       } else {
         addToast('error', result.message || 'Login failed');
       }
@@ -44,54 +43,61 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess, addToast }) => {
           {/* Decorative shine effect */}
           <div className="absolute top-0 left-[-100%] w-full h-full bg-gradient-to-r from-transparent via-gold-500/5 to-transparent skew-x-12 group-hover:left-[200%] transition-all duration-1000 ease-in-out pointer-events-none" />
 
-          <div className="flex justify-center mb-8">
+          <div className="flex justify-center mb-6">
             <div className="p-4 bg-gold-900/20 rounded-full border border-gold-600/30">
               <Lock className="w-8 h-8 text-gold-500" />
             </div>
           </div>
 
-          <h2 className="text-3xl font-serif text-center text-white mb-2">Welcome Back</h2>
-          <p className="text-zinc-500 text-center text-sm mb-8">Please authenticate to access the studio.</p>
+          <h2 className="text-3xl font-serif text-center text-white mb-2">Studio Access</h2>
+          <p className="text-zinc-500 text-center text-sm mb-8 px-4">
+            Enter your secure credentials to manage productions.
+          </p>
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-1">
-              <label className="text-xs uppercase font-bold text-gold-700 ml-1">Username</label>
+              <label className="text-xs uppercase font-bold text-gold-600 ml-1 flex justify-between">
+                Username
+              </label>
               <input 
                 type="text" 
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-gold-500 text-white p-3 rounded-lg outline-none transition-all placeholder:text-zinc-700"
-                placeholder="Enter username"
+                placeholder="e.g. producer_one"
               />
             </div>
             
             <div className="space-y-1">
-              <label className="text-xs uppercase font-bold text-gold-700 ml-1">Access Token</label>
+              <label className="text-xs uppercase font-bold text-gold-600 ml-1 flex justify-between group cursor-help">
+                <span className="flex items-center gap-1">Access Token <HelpCircle className="w-3 h-3 text-zinc-600" /></span>
+                <span className="text-[9px] text-zinc-600 normal-case font-normal opacity-0 group-hover:opacity-100 transition-opacity">e.g. pk-738...</span>
+              </label>
               <input 
                 type="password" 
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-gold-500 text-white p-3 rounded-lg outline-none transition-all placeholder:text-zinc-700"
-                placeholder="••••••••••••••"
+                placeholder="Paste your token here..."
               />
             </div>
 
             <button 
               type="submit" 
               disabled={isLoading || !username || !token}
-              className="w-full mt-2 bg-gradient-to-r from-gold-600 to-gold-500 hover:brightness-110 text-black font-bold py-3.5 rounded-lg shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full mt-2 bg-gradient-to-r from-gold-600 to-gold-500 hover:brightness-110 text-black font-bold py-3.5 rounded-lg shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wider text-sm"
             >
-              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Log In'}
+              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Enter Studio'}
             </button>
           </form>
 
           <div className="mt-8 pt-6 border-t border-gold-900/20 text-center">
-            <p className="text-zinc-500 text-xs mb-3">Don't have a token?</p>
+            <p className="text-zinc-500 text-xs mb-3">New Producer?</p>
             <button 
               onClick={() => setShowRequestModal(true)}
-              className="text-gold-500 hover:text-gold-300 text-sm font-medium flex items-center justify-center gap-2 mx-auto transition-colors"
+              className="group text-gold-500 hover:text-gold-300 text-sm font-medium flex items-center justify-center gap-2 mx-auto transition-colors"
             >
-              <Key className="w-4 h-4" /> Request Access
+              <span className="border-b border-transparent group-hover:border-gold-300">Request Access Token</span> <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </button>
           </div>
         </div>
@@ -101,8 +107,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess, addToast }) => {
         <TokenRequestModal 
           onClose={() => setShowRequestModal(false)} 
           onSuccess={() => {
-            addToast('success', 'Request sent successfully. Check your email/messages.');
-            // Optionally keep modal open or close it. UX choice: keep open on success step.
+            // Success view handles navigation
           }}
         />
       )}
