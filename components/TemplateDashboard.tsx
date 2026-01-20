@@ -3,6 +3,7 @@ import { Plus, Play, Trash2, ArrowLeftRight, Loader2, Gamepad2, Download, Upload
 import { dataService } from '../services/dataService';
 import { Show, GameTemplate } from '../types';
 import { TemplateBuilder } from './TemplateBuilder';
+import { soundService } from '../services/soundService';
 
 interface Props {
   show: Show;
@@ -27,6 +28,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
   // --- ACTIONS ---
 
   const handleCreateNew = () => {
+    soundService.playClick();
     if (templates.length >= 40) {
       addToast('error', 'Limit reached (40 templates).');
       return;
@@ -35,11 +37,13 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
   };
 
   const handleEdit = (t: GameTemplate) => {
+    soundService.playClick();
     setEditingTemplate(t);
   };
 
   const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    soundService.playClick();
     if (confirm('Delete this template permanently?')) {
       dataService.deleteTemplate(id);
       loadTemplates();
@@ -49,6 +53,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
 
   const handleDownload = (e: React.MouseEvent, t: GameTemplate) => {
     e.stopPropagation();
+    soundService.playClick();
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(t, null, 2));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
@@ -59,6 +64,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
   };
 
   const handleUploadClick = () => {
+    soundService.playClick();
     fileInputRef.current?.click();
   };
 
@@ -89,7 +95,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
       <TemplateBuilder 
         showId={show.id}
         initialTemplate={editingTemplate}
-        onClose={() => setEditingTemplate(undefined)}
+        onClose={() => { soundService.playClick(); setEditingTemplate(undefined); }}
         onSave={() => {
           setEditingTemplate(undefined);
           loadTemplates();
@@ -125,7 +131,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
             <Upload className="w-3 h-3" /> Import
           </button>
           <button 
-            onClick={onSwitchShow}
+            onClick={() => { soundService.playClick(); onSwitchShow(); }}
             className="text-zinc-400 hover:text-white flex items-center gap-2 text-xs uppercase font-bold border border-zinc-800 hover:border-zinc-600 px-4 py-2 rounded transition-all"
           >
             <ArrowLeftRight className="w-3 h-3" /> Switch Show
@@ -171,7 +177,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
             </div>
 
             <button 
-               onClick={() => onPlayTemplate(t)}
+               onClick={() => { soundService.playSelect(); onPlayTemplate(t); }}
                className="w-full mt-2 bg-zinc-900 hover:bg-gold-600 hover:text-black text-gold-500 font-bold py-2 rounded text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors"
             >
               <Play className="w-3 h-3" /> Play Show

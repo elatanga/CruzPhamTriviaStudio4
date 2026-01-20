@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { ToastMessage } from '../types';
 import { XCircle, CheckCircle, Info } from 'lucide-react';
+import { soundService } from '../services/soundService';
 
 interface ToastContainerProps {
   toasts: ToastMessage[];
@@ -19,9 +20,12 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, removeTo
 
 const ToastItem: React.FC<{ toast: ToastMessage; onRemove: () => void }> = ({ toast, onRemove }) => {
   useEffect(() => {
+    // Play sound on mount
+    soundService.playToast(toast.type);
+
     const timer = setTimeout(onRemove, 5000);
     return () => clearTimeout(timer);
-  }, [onRemove]);
+  }, [toast.type, onRemove]);
 
   const bgStyles = {
     success: 'bg-green-900/90 border-green-500 text-green-100',

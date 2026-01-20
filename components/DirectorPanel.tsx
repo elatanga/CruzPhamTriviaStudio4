@@ -3,6 +3,7 @@ import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, Ext
 import { GameState, Question, Difficulty, Category } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
+import { soundService } from '../services/soundService';
 
 interface Props {
   gameState: GameState;
@@ -40,6 +41,7 @@ export const DirectorPanel: React.FC<Props> = ({
   };
 
   const handleSaveQuestion = (cIdx: number, qIdx: number, q: Partial<Question>) => {
+    soundService.playClick();
     const newCats = [...gameState.categories];
     const oldQ = newCats[cIdx].questions[qIdx];
     
@@ -65,6 +67,7 @@ export const DirectorPanel: React.FC<Props> = ({
   };
 
   const handleAiReplace = async (cIdx: number, qIdx: number, difficulty: Difficulty) => {
+    soundService.playClick();
     setAiLoading(true);
     try {
       const cat = gameState.categories[cIdx];
@@ -89,6 +92,7 @@ export const DirectorPanel: React.FC<Props> = ({
   };
 
   const handleAiRewriteCategory = async (cIdx: number) => {
+    soundService.playClick();
     if (!confirm('Rewrite entire category? Existing questions will be lost.')) return;
     setAiLoading(true);
     try {
@@ -96,7 +100,6 @@ export const DirectorPanel: React.FC<Props> = ({
       const newQs = await generateCategoryQuestions(gameState.showTitle, cat.title, cat.questions.length, 'mixed');
       
       const newCats = [...gameState.categories];
-      // Preserve IDs if possible or map props? Let's keep IDs to avoid key thrashing if we wanted, but replace is fine
       newCats[cIdx].questions = newQs.map((nq, i) => ({
         ...nq,
         points: (i + 1) * 100, // Enforce points
@@ -113,6 +116,7 @@ export const DirectorPanel: React.FC<Props> = ({
   };
 
   const forceCloseDirector = () => {
+    soundService.playClick();
     setEditingQuestion(null);
     addToast('info', 'Director UI reset.');
   };
@@ -140,13 +144,13 @@ export const DirectorPanel: React.FC<Props> = ({
       {/* TOOLBAR */}
       <div className="flex-none h-14 border-b border-zinc-800 flex items-center px-4 justify-between bg-black">
         <div className="flex items-center gap-1">
-          <button onClick={() => setActiveTab('BOARD')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button onClick={() => { soundService.playClick(); setActiveTab('BOARD'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Grid className="w-4 h-4" /> Board
           </button>
-          <button onClick={() => setActiveTab('PLAYERS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button onClick={() => { soundService.playClick(); setActiveTab('PLAYERS'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Users className="w-4 h-4" /> Players
           </button>
-          <button onClick={() => setActiveTab('GAME')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'GAME' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button onClick={() => { soundService.playClick(); setActiveTab('GAME'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'GAME' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Settings className="w-4 h-4" /> Config
           </button>
         </div>
@@ -156,7 +160,7 @@ export const DirectorPanel: React.FC<Props> = ({
              <RotateCcw className="w-4 h-4" />
           </button>
           {onPopout && (
-            <button onClick={onPopout} className="flex items-center gap-2 text-xs font-bold uppercase text-gold-500 border border-gold-900/50 px-3 py-1.5 rounded hover:bg-gold-900/20">
+            <button onClick={() => { soundService.playClick(); onPopout(); }} className="flex items-center gap-2 text-xs font-bold uppercase text-gold-500 border border-gold-900/50 px-3 py-1.5 rounded hover:bg-gold-900/20">
               <ExternalLink className="w-3 h-3" /> Detach
             </button>
           )}
@@ -173,7 +177,7 @@ export const DirectorPanel: React.FC<Props> = ({
                <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Live Board Control</h3>
                {gameState.activeQuestionId && (
                  <button 
-                   onClick={() => onUpdateState({...gameState, activeQuestionId: null, activeCategoryId: null})} 
+                   onClick={() => { soundService.playClick(); onUpdateState({...gameState, activeQuestionId: null, activeCategoryId: null}); }} 
                    className="bg-red-900/50 text-red-200 border border-red-800 px-3 py-1 rounded text-xs font-bold uppercase flex items-center gap-2 hover:bg-red-900"
                  >
                    <MonitorOff className="w-3 h-3" /> Force Close Active Q
@@ -195,7 +199,7 @@ export const DirectorPanel: React.FC<Props> = ({
                   {cat.questions.map((q, qIdx) => (
                     <div 
                       key={q.id}
-                      onClick={() => setEditingQuestion({cIdx, qIdx})}
+                      onClick={() => { soundService.playClick(); setEditingQuestion({cIdx, qIdx}); }}
                       className={`
                         p-3 rounded border flex flex-col gap-1 cursor-pointer transition-all hover:brightness-110 relative
                         ${q.isVoided ? 'bg-red-900/20 border-red-800' : q.isAnswered ? 'bg-zinc-900 border-zinc-800 opacity-60' : 'bg-zinc-800 border-zinc-700'}
@@ -251,6 +255,7 @@ export const DirectorPanel: React.FC<Props> = ({
                          <button 
                             onClick={() => {
                               if(confirm('Remove player?')) {
+                                soundService.playClick();
                                 onUpdateState({...gameState, players: gameState.players.filter(x => x.id !== p.id)});
                               }
                             }}
@@ -304,7 +309,7 @@ export const DirectorPanel: React.FC<Props> = ({
                   <h3 className="text-gold-500 font-bold">{cat.title} // {q.points}</h3>
                   {q.isVoided && <span className="text-red-500 text-xs font-bold uppercase tracking-wider">Currently Voided</span>}
                 </div>
-                <button onClick={() => setEditingQuestion(null)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
+                <button onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
@@ -340,7 +345,7 @@ export const DirectorPanel: React.FC<Props> = ({
               </div>
 
               <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-zinc-800">
-                <button onClick={() => setEditingQuestion(null)} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
+                <button onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
                 <button 
                   onClick={() => {
                      const txt = (document.getElementById('dir-q-text') as HTMLTextAreaElement).value;

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, PlaySquare, Film, Loader2 } from 'lucide-react';
 import { dataService } from '../services/dataService';
 import { Show } from '../types';
+import { soundService } from '../services/soundService';
 
 interface Props {
   username: string;
@@ -21,6 +22,7 @@ export const ShowSelection: React.FC<Props> = ({ username, onSelectShow }) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
     
+    soundService.playClick();
     setIsCreating(true);
     // Simulate brief network delay
     setTimeout(() => {
@@ -72,7 +74,7 @@ export const ShowSelection: React.FC<Props> = ({ username, onSelectShow }) => {
           {shows.map(show => (
             <button
               key={show.id}
-              onClick={() => onSelectShow(show)}
+              onClick={() => { soundService.playSelect(); onSelectShow(show); }}
               className="group bg-zinc-900/50 border border-zinc-800 hover:border-gold-500 p-6 rounded text-left transition-all hover:bg-zinc-900 relative overflow-hidden"
             >
               <div className="absolute top-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity">

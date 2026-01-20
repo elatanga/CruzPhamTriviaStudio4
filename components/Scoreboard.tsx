@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Minus } from 'lucide-react';
 import { Player } from '../types';
+import { soundService } from '../services/soundService';
 
 interface Props {
   players: Player[];
@@ -19,6 +20,7 @@ export const Scoreboard: React.FC<Props> = ({
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (newName.trim()) {
+      soundService.playClick();
       onAddPlayer(newName.trim());
       setNewName('');
     }
@@ -57,13 +59,13 @@ export const Scoreboard: React.FC<Props> = ({
               {/* Quick Actions */}
               <div className="flex gap-1 h-6">
                  <button 
-                   onClick={(e) => { e.stopPropagation(); onUpdateScore(p.id, -100); }} 
+                   onClick={(e) => { e.stopPropagation(); soundService.playClick(); onUpdateScore(p.id, -100); }} 
                    className="flex-1 bg-zinc-950/80 border border-zinc-800 text-red-500 hover:border-red-500 hover:bg-red-900/20 rounded flex items-center justify-center transition-colors"
                  >
                    <Minus className="w-3 h-3" />
                  </button>
                  <button 
-                   onClick={(e) => { e.stopPropagation(); onUpdateScore(p.id, 100); }} 
+                   onClick={(e) => { e.stopPropagation(); soundService.playClick(); onUpdateScore(p.id, 100); }} 
                    className="flex-1 bg-zinc-950/80 border border-zinc-800 text-green-500 hover:border-green-500 hover:bg-green-900/20 rounded flex items-center justify-center transition-colors"
                  >
                    <Plus className="w-3 h-3" />

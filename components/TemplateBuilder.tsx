@@ -3,6 +3,7 @@ import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Tras
 import { GameTemplate, Category, Question, Difficulty } from '../types';
 import { generateTriviaGame, generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { dataService } from '../services/dataService';
+import { soundService } from '../services/soundService';
 
 interface Props {
   showId: string;
@@ -42,6 +43,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   }, [initialTemplate]);
 
   const initBoard = () => {
+    soundService.playClick();
     if (!config.title.trim()) {
       addToast('error', 'Title is required');
       return;
@@ -76,6 +78,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   // --- ACTIONS ---
 
   const handleSave = () => {
+    soundService.playClick();
     try {
       // Enforce: Each category must have exactly one Double Or Nothing
       // If none found (e.g. manual edit interference), assign one randomly.
@@ -117,6 +120,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
 
   const handleAiFillBoard = async (prompt: string, difficulty: Difficulty) => {
     if (!prompt.trim()) return;
+    soundService.playClick();
     setIsAiLoading(true);
     try {
       const generatedCats = await generateTriviaGame(prompt, difficulty, categories.length, categories[0].questions.length);
@@ -133,6 +137,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   };
 
   const handleAiRewriteCategory = async (cIdx: number) => {
+    soundService.playClick();
     if (!confirm('Rewrite entire category? Existing content will be lost.')) return;
     setIsAiLoading(true);
     try {
@@ -155,6 +160,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   };
 
   const handleMagicCell = async (cIdx: number, qIdx: number) => {
+    soundService.playClick();
     setIsAiLoading(true);
     try {
       const cat = categories[cIdx];
@@ -174,6 +180,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
 
   const updateCell = (text: string, answer: string) => {
     if (!editCell) return;
+    soundService.playClick();
     const { cIdx, qIdx } = editCell;
     const newCats = [...categories];
     newCats[cIdx].questions[qIdx] = { ...newCats[cIdx].questions[qIdx], text, answer };
@@ -212,17 +219,17 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                 <div className="flex justify-between items-center">
                     <label className="text-xs text-zinc-300">Categories (1-8)</label>
                     <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
-                      <button onClick={() => setConfig(p => ({...p, catCount: Math.max(1, p.catCount - 1)}))} className="text-gold-500 hover:text-white p-1"><Minus className="w-3 h-3" /></button>
+                      <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, catCount: Math.max(1, p.catCount - 1)}))}} className="text-gold-500 hover:text-white p-1"><Minus className="w-3 h-3" /></button>
                       <span className="text-sm font-mono text-white w-4 text-center">{config.catCount}</span>
-                      <button onClick={() => setConfig(p => ({...p, catCount: Math.min(8, p.catCount + 1)}))} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
+                      <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, catCount: Math.min(8, p.catCount + 1)}))}} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
                     </div>
                 </div>
                 <div className="flex justify-between items-center">
                     <label className="text-xs text-zinc-300">Rows (1-10)</label>
                     <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
-                      <button onClick={() => setConfig(p => ({...p, rowCount: Math.max(1, p.rowCount - 1)}))} className="text-gold-500 hover:text-white p-1"><Minus className="w-3 h-3" /></button>
+                      <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, rowCount: Math.max(1, p.rowCount - 1)}))}} className="text-gold-500 hover:text-white p-1"><Minus className="w-3 h-3" /></button>
                       <span className="text-sm font-mono text-white w-4 text-center">{config.rowCount}</span>
-                      <button onClick={() => setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
+                      <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))}} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
                     </div>
                 </div>
               </div>
@@ -232,7 +239,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                 <div className="flex justify-between items-center border-b border-zinc-800 pb-1">
                    <h3 className="text-xs uppercase text-zinc-400 font-bold">Contestants ({playerNames.length}/8)</h3>
                    {playerNames.length < 8 && (
-                     <button onClick={() => setPlayerNames([...playerNames, `Player ${playerNames.length + 1}`])} className="text-[10px] text-gold-500 hover:text-white flex items-center gap-1">
+                     <button onClick={() => { soundService.playClick(); setPlayerNames([...playerNames, `Player ${playerNames.length + 1}`])}} className="text-[10px] text-gold-500 hover:text-white flex items-center gap-1">
                        <Plus className="w-3 h-3" /> ADD
                      </button>
                    )}
@@ -251,7 +258,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                             placeholder={`Player ${idx+1}`}
                         />
                         {playerNames.length > 1 && (
-                            <button onClick={() => setPlayerNames(playerNames.filter((_, i) => i !== idx))} className="text-zinc-600 hover:text-red-500 px-1">
+                            <button onClick={() => { soundService.playClick(); setPlayerNames(playerNames.filter((_, i) => i !== idx))}} className="text-zinc-600 hover:text-red-500 px-1">
                                 <Trash2 className="w-3 h-3" />
                             </button>
                         )}
@@ -266,6 +273,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                <h3 className="text-xs uppercase text-gold-600 font-bold mb-2 flex items-center gap-2"><Wand2 className="w-3 h-3" /> Instant Start</h3>
                <p className="text-[10px] text-zinc-500 mb-3">Skip manual setup and let AI generate the entire board structure and content.</p>
                <AiToolbar onGenerate={(prompt, diff) => {
+                  soundService.playClick();
                   setConfig(p => ({...p, title: prompt}));
                   // We need to initialize categories first then fill
                   const newCats = Array.from({ length: config.catCount }).map((_, cI) => ({
@@ -294,7 +302,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
           </div>
 
           <div className="flex gap-3 mt-8 pt-4 border-t border-zinc-800 flex-none">
-             <button onClick={onClose} className="flex-1 py-3 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 text-sm">Cancel</button>
+             <button onClick={() => { soundService.playClick(); onClose(); }} className="flex-1 py-3 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 text-sm">Cancel</button>
              <button onClick={initBoard} disabled={!config.title || isAiLoading} className="flex-1 py-3 rounded bg-gold-600 text-black font-bold hover:bg-gold-500 disabled:opacity-50 text-sm flex items-center justify-center gap-2">
                {isAiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Start Building'}
              </button>
@@ -309,7 +317,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
       {/* HEADER */}
       <div className="h-16 bg-zinc-900 border-b border-gold-900/30 flex items-center justify-between px-6">
         <div className="flex items-center gap-4">
-          <button onClick={onClose} className="text-zinc-500 hover:text-white"><X className="w-6 h-6" /></button>
+          <button onClick={() => { soundService.playClick(); onClose(); }} className="text-zinc-500 hover:text-white"><X className="w-6 h-6" /></button>
           <input 
             value={config.title} 
             onChange={e => setConfig(p => ({...p, title: e.target.value}))}
@@ -352,7 +360,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
               {cat.questions.map((q, qIdx) => (
                 <div 
                   key={q.id}
-                  onClick={() => setEditCell({cIdx, qIdx})}
+                  onClick={() => { soundService.playSelect(); setEditCell({cIdx, qIdx}); }}
                   className="bg-zinc-900 border border-zinc-800 hover:border-gold-500 text-gold-400 font-serif font-bold text-2xl flex-1 flex flex-col items-center justify-center rounded cursor-pointer relative group transition-all"
                 >
                   <span className={q.isDoubleOrNothing ? 'text-red-500' : ''}>{q.points}</span>
@@ -376,7 +384,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
              <div className="w-full max-w-lg bg-zinc-900 border border-gold-500/50 rounded-xl p-6 shadow-2xl">
                <div className="flex justify-between items-center mb-4">
                   <h3 className="text-gold-500 font-bold">{categories[cIdx].title} // {q.points} Points</h3>
-                  <button onClick={() => setEditCell(null)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
+                  <button onClick={() => { soundService.playClick(); setEditCell(null); }} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
                </div>
                
                <div className="space-y-4">
@@ -402,6 +410,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                       id="edit-q-double" 
                       defaultChecked={q.isDoubleOrNothing}
                       onChange={(e) => {
+                         soundService.playClick();
                          // Manually toggling double means we might have 2 or 0 in category. 
                          // handleSave will fix 0, but 2 is allowed if manual.
                          const newCats = [...categories];
@@ -448,7 +457,7 @@ const AiToolbar: React.FC<{ onGenerate: (p: string, d: Difficulty) => void }> = 
 
   if (!isOpen) {
     return (
-      <button onClick={() => setIsOpen(true)} className="text-gold-500 border border-gold-600/50 hover:bg-gold-900/20 px-3 py-2 rounded flex items-center gap-2 text-xs uppercase font-bold transition-all">
+      <button onClick={() => { soundService.playClick(); setIsOpen(true); }} className="text-gold-500 border border-gold-600/50 hover:bg-gold-900/20 px-3 py-2 rounded flex items-center gap-2 text-xs uppercase font-bold transition-all">
         <Wand2 className="w-4 h-4" /> AI Generate
       </button>
     );
@@ -473,7 +482,7 @@ const AiToolbar: React.FC<{ onGenerate: (p: string, d: Difficulty) => void }> = 
         <option value="mixed">Mixed</option>
       </select>
       <button onClick={() => { onGenerate(prompt, diff); setIsOpen(false); }} className="bg-purple-600 hover:bg-purple-500 text-white p-2 rounded"><Wand2 className="w-3 h-3" /></button>
-      <button onClick={() => setIsOpen(false)} className="text-zinc-500 hover:text-white p-2"><X className="w-3 h-3" /></button>
+      <button onClick={() => { soundService.playClick(); setIsOpen(false); }} className="text-zinc-500 hover:text-white p-2"><X className="w-3 h-3" /></button>
     </div>
   );
 };
