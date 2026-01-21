@@ -2,11 +2,22 @@
 const express = require("express");
 const path = require("path");
 
+// Global Error Handlers - Prevent container exit on non-critical errors
+process.on('uncaughtException', (err) => {
+  console.error('CRITICAL: Uncaught Exception:', err);
+  // In production, we might want to exit, but on Cloud Run, keeping the container alive 
+  // to serve a friendly error page or retry is often safer during startup.
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 const app = express();
 
-// Required keys for Firebase connection (Clean standard env vars)
-// These must be set in Cloud Run configuration without REACT_APP_ prefix
-const REQUIRED = [
+// 1. CONSTANTS & ENV
+const PORT = process.env.PORT || 8080;
+const REQUIRED_KEYS = [
   "FIREBASE_API_KEY",
   "FIREBASE_AUTH_DOMAIN",
   "FIREBASE_PROJECT_ID",
@@ -15,79 +26,84 @@ const REQUIRED = [
   "FIREBASE_APP_ID",
 ];
 
-// Runtime Configuration Endpoint
+// 2. RUNTIME CONFIG ENDPOINT (Must be defined BEFORE static files)
 app.get("/runtime-config.js", (req, res) => {
   res.setHeader("Content-Type", "application/javascript; charset=utf-8");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("X-Content-Type-Options", "nosniff");
 
-  // Filter missing keys from the REQUIRED list
-  const missing = REQUIRED.filter((k) => !process.env[k] || String(process.env[k]).trim() === "");
-
+  const missing = REQUIRED_KEYS.filter((k) => !process.env[k] || String(process.env[k]).trim() === "");
+  
   if (missing.length > 0) {
-    console.error("CRITICAL: Runtime config missing environment variables:", missing);
-    // Return a safe, valid JS object indicating failure, never HTML
-    res.status(200).send(`
-      console.error("CRITICAL: Runtime config missing keys: ${JSON.stringify(missing)}");
-      window.__RUNTIME_CONFIG__ = null;
-    `);
-    return;
+    console.error("CONFIG WARNING: Missing runtime keys:", missing);
+    // Don't crash, but warn client
   }
 
-  // Construct configuration object from process.env
-  const cfg = {
-    FIREBASE_API_KEY: process.env.FIREBASE_API_KEY,
-    FIREBASE_AUTH_DOMAIN: process.env.FIREBASE_AUTH_DOMAIN,
-    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
-    FIREBASE_STORAGE_BUCKET: process.env.FIREBASE_STORAGE_BUCKET,
-    FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
-    FIREBASE_APP_ID: process.env.FIREBASE_APP_ID,
-    // Optional / Service specific keys
-    API_KEY: process.env.API_KEY || "", 
-    BUILD_ENV: process.env.BUILD_ENV || process.env.NODE_ENV || "production",
-    BUILD_VERSION: process.env.BUILD_VERSION || "unknown",
-  };
+  const safe = (v) => String(v || "").replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$/g, "\\$");
 
-  // Safe string escaping to prevent injection in the generated JS
-  const safe = (v) => String(v).replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$/g, "\\$").replace(/\n/g, "\\n").replace(/\r/g, "\\r");
-
-  const jsContent = `
+  const configContent = `
     window.__RUNTIME_CONFIG__ = {
-      FIREBASE_API_KEY: "${safe(cfg.FIREBASE_API_KEY)}",
-      FIREBASE_AUTH_DOMAIN: "${safe(cfg.FIREBASE_AUTH_DOMAIN)}",
-      FIREBASE_PROJECT_ID: "${safe(cfg.FIREBASE_PROJECT_ID)}",
-      FIREBASE_STORAGE_BUCKET: "${safe(cfg.FIREBASE_STORAGE_BUCKET)}",
-      FIREBASE_MESSAGING_SENDER_ID: "${safe(cfg.FIREBASE_MESSAGING_SENDER_ID)}",
-      FIREBASE_APP_ID: "${safe(cfg.FIREBASE_APP_ID)}",
-      API_KEY: "${safe(cfg.API_KEY)}",
-      BUILD_ENV: "${safe(cfg.BUILD_ENV)}",
-      BUILD_VERSION: "${safe(cfg.BUILD_VERSION)}"
+      FIREBASE_API_KEY: "${safe(process.env.FIREBASE_API_KEY)}",
+      FIREBASE_AUTH_DOMAIN: "${safe(process.env.FIREBASE_AUTH_DOMAIN)}",
+      FIREBASE_PROJECT_ID: "${safe(process.env.FIREBASE_PROJECT_ID)}",
+      FIREBASE_STORAGE_BUCKET: "${safe(process.env.FIREBASE_STORAGE_BUCKET)}",
+      FIREBASE_MESSAGING_SENDER_ID: "${safe(process.env.FIREBASE_MESSAGING_SENDER_ID)}",
+      FIREBASE_APP_ID: "${safe(process.env.FIREBASE_APP_ID)}",
+      API_KEY: "${safe(process.env.API_KEY)}",
+      BUILD_ENV: "${safe(process.env.BUILD_ENV || "production")}",
+      BUILD_VERSION: "${safe(process.env.BUILD_VERSION || "1.0.0")}"
     };
+    console.log("CRUZPHAM: Runtime config loaded");
   `;
 
-  res.status(200).send(jsContent);
+  res.status(200).send(configContent);
 });
 
-// Serve Static Assets from Build Directory
+// 3. HEALTH CHECK (Critical for Cloud Run)
+app.get("/_health", (req, res) => {
+  res.status(200).send("OK");
+});
+
+// 4. STATIC FILES
 const buildPath = path.join(__dirname, "build");
 app.use(express.static(buildPath, { 
   maxAge: "1h", 
   etag: true,
   setHeaders: (res, path) => {
-    // Security headers for static assets
-    res.setHeader("X-Content-Type-Options", "nosniff");
+    // Never cache index.html, allow service worker logic or hard reload
+    if (path.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
   }
 }));
 
-// SPA Fallback: Serve index.html for unknown routes
-// IMPORTANT: Ignore requests that look like static assets (JS/CSS/Images) to prevent returning HTML for missing files
+// 5. SPA FALLBACK
+// Catch-all handler for React Routing
 app.get("*", (req, res) => {
-  if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|json|svg)$/)) {
+  // Security: Don't serve index.html for missing static assets (prevent MIME confusion)
+  if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|json|svg|map)$/)) {
     res.status(404).send("Not Found");
     return;
   }
   res.sendFile(path.join(buildPath, "index.html"));
 });
 
-const port = process.env.PORT || 8080;
-app.listen(port, () => console.log("Server listening on port", port));
+// 6. START SERVER
+try {
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`SERVER: Listening on port ${PORT}`);
+    console.log(`SERVER: Serving build from ${buildPath}`);
+    console.log(`SERVER: Environment ${process.env.NODE_ENV}`);
+  });
+  
+  // Graceful Shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    server.close(() => {
+      console.log('Process terminated');
+    });
+  });
+} catch (e) {
+  console.error('CRITICAL: Server failed to start', e);
+  process.exit(1);
+}
