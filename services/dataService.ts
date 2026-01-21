@@ -48,7 +48,7 @@ class DataService {
     const shows = this.getShowsDB();
     shows.push(newShow);
     this.saveShowsDB(shows);
-    logger.info('GAME', `[DataService] Created show: ${title} for ${username}`);
+    logger.info(`[DataService] Created show: ${title} for ${username}`);
     return newShow;
   }
 
@@ -79,7 +79,7 @@ class DataService {
     const all = this.getTemplatesDB();
     all.push(newTemplate);
     this.saveTemplatesDB(all);
-    logger.info('GAME', `[DataService] Saved template: ${topic} for show ${showId}`);
+    logger.info(`[DataService] Saved template: ${topic} for show ${showId}`);
     return newTemplate;
   }
 
@@ -89,7 +89,7 @@ class DataService {
     if (idx !== -1) {
       all[idx] = { ...template, lastModified: new Date().toISOString() };
       this.saveTemplatesDB(all);
-      logger.info('GAME', `[DataService] Updated template: ${template.id}`);
+      logger.info(`[DataService] Updated template: ${template.id}`);
     }
   }
 
@@ -97,7 +97,7 @@ class DataService {
     let all = this.getTemplatesDB();
     all = all.filter(t => t.id !== templateId);
     this.saveTemplatesDB(all);
-    logger.info('GAME', `[DataService] Deleted template: ${templateId}`);
+    logger.info(`[DataService] Deleted template: ${templateId}`);
   }
 
   importTemplate(showId: string, jsonContent: string): GameTemplate {

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Shield, Search, Check, X, Copy, Trash2, Mail, MessageSquare, Plus, Loader2, RefreshCw, Key, Ban, UserCheck, AlertTriangle, Smartphone } from 'lucide-react';
+import { Users, Inbox, Shield, Search, Check, X, Copy, Trash2, Clock, Mail, MessageSquare, Plus, Loader2, RefreshCw, Key, Ban, UserCheck, AlertTriangle, Send, Eye, FileText, Smartphone } from 'lucide-react';
 import { authService } from '../services/authService';
 import { User, TokenRequest, AuditLogEntry, UserRole, UserSource } from '../types';
 
@@ -16,22 +16,22 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
   const [requests, setRequests] = useState<TokenRequest[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [retryLoading, setRetryLoading] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   
   // Master Admin Check
   const myself = users.find(u => u.username === currentUser);
-  const isMaster = myself?.role === 'MASTER_ADMIN' || currentUser === 'admin'; // fallback for bootstrap session
+  const isMaster = myself?.role === 'MASTER_ADMIN';
 
-  // Filtering
+  // State: Filtering
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState<'ALL' | 'ADMIN' | 'PRODUCER'>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'REVOKED'>('ALL');
 
-  // Modals / Actions
+  // State: Modals / Actions
   const [isCreating, setIsCreating] = useState(false);
   const [newUser, setNewUser] = useState({ username: '', role: 'PRODUCER' as UserRole, duration: '', email: '', phone: '', tiktok: '', firstName: '', lastName: '' });
   const [actionLoading, setActionLoading] = useState<string | null>(null); 
   
+  // Modals
   const [credentialModal, setCredentialModal] = useState<{username: string, token: string} | null>(null);
   const [viewUser, setViewUser] = useState<User | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -39,33 +39,18 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
     username: string;
   } | null>(null);
 
+  // Approval Modal State
   const [approvingReq, setApprovingReq] = useState<TokenRequest | null>(null);
   const [approvalUsername, setApprovalUsername] = useState('');
 
-  // --- REAL-TIME DATA ---
-  
   useEffect(() => {
-    // Users (fetch once usually okay, but we can make it async)
-    setLoading(true);
-    authService.getAllUsers().then(setUsers).finally(() => setLoading(false));
+    refreshData();
+  }, [activeTab]);
 
-    // Requests (Real-time)
-    const reqUnsub = authService.subscribeToRequests((reqs) => {
-       setRequests(reqs);
-    });
-
-    // Audit (Real-time)
-    const auditUnsub = authService.subscribeToAudit((logs) => {
-       setAuditLogs(logs);
-    });
-
-    return () => {
-      authService.unsubscribeAll();
-    };
-  }, []);
-
-  const refreshUsers = () => {
-    authService.getAllUsers().then(setUsers);
+  const refreshData = () => {
+    setUsers(authService.getAllUsers());
+    setRequests(authService.getRequests());
+    setAuditLogs(authService.getAuditLogs());
   };
 
   // --- ACTIONS ---
@@ -91,7 +76,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
       
       setIsCreating(false);
       setNewUser({ username: '', role: 'PRODUCER', duration: '', email: '', phone: '', tiktok: '', firstName: '', lastName: '' });
-      refreshUsers();
+      refreshData();
     } catch (e: any) {
       addToast('error', e.message);
     }
@@ -102,8 +87,9 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
     try {
       await authService.retryAdminNotification(reqId);
       addToast('success', 'Notification retry initiated.');
-    } catch (e: any) {
-      addToast('error', e.message);
+      refreshData();
+    } catch (e) {
+      addToast('error', 'Retry failed');
     } finally {
       setRetryLoading(null);
     }
@@ -122,7 +108,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
       setCredentialModal({ username: result.user.username, token: result.rawToken });
       addToast('success', 'Request Approved & User Created');
       setApprovingReq(null);
-      refreshUsers();
+      refreshData();
     } catch (e: any) {
       addToast('error', e.message);
     } finally {
@@ -151,7 +137,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
         await authService.deleteUser(currentUser, username);
         addToast('info', 'User deleted.');
       }
-      refreshUsers();
+      refreshData();
     } catch (e: any) {
       addToast('error', e.message);
     } finally {
@@ -165,6 +151,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
     try {
       await authService.sendMessage(currentUser, targetUsername, method, msg);
       addToast('success', `${method} sent successfully.`);
+      refreshData();
     } catch (e: any) {
       addToast('error', `Send failed: ${e.message}`);
     } finally {
@@ -205,10 +192,8 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
       <div className="flex-1 overflow-hidden relative">
         <div className="h-full overflow-auto p-6 custom-scrollbar">
           
-          {loading && <div className="text-center py-4 text-zinc-500"><Loader2 className="w-6 h-6 animate-spin mx-auto"/> Loading Data...</div>}
-
           {/* === USERS TAB === */}
-          {activeTab === 'USERS' && !loading && (
+          {activeTab === 'USERS' && (
             <div className="space-y-6 max-w-7xl mx-auto">
               {/* Toolbar */}
               <div className="flex flex-col md:flex-row gap-4 justify-between items-end md:items-center bg-zinc-900/50 p-4 rounded-lg border border-zinc-800">
@@ -272,6 +257,10 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
                       <label className="text-[10px] uppercase text-zinc-500 font-bold">Phone (Optional)</label>
                       <input type="tel" value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs focus:border-gold-500 outline-none" />
                     </div>
+                     <div className="space-y-1">
+                      <label className="text-[10px] uppercase text-zinc-500 font-bold">Duration (Mins, Optional)</label>
+                      <input type="number" placeholder="Permanent" value={newUser.duration} onChange={e => setNewUser({...newUser, duration: e.target.value})} className="w-full bg-black border border-zinc-700 p-2 rounded text-white text-xs focus:border-gold-500 outline-none" />
+                    </div>
                   </div>
                   <div className="flex justify-end gap-3">
                     <button type="button" onClick={() => setIsCreating(false)} className="text-zinc-500 hover:text-white px-4 py-2 text-xs">Cancel</button>
@@ -284,7 +273,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
               <div className="grid grid-cols-1 gap-4">
                 {filteredUsers.map(u => (
                   <div key={u.id} className={`bg-zinc-900 border p-4 rounded-lg flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between group transition-all ${u.status === 'REVOKED' ? 'border-red-900/50 opacity-70' : 'border-zinc-800 hover:border-zinc-600'}`}>
-                    {/* User Info */}
+                    {/* (User Info & Actions - Same as previous) */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-1">
                         <h4 className="font-bold text-white text-lg truncate">{u.username}</h4>
@@ -302,6 +291,9 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
                     {/* Action Buttons */}
                     {u.role !== 'MASTER_ADMIN' && (
                       <div className="flex flex-wrap items-center gap-2">
+                         <button onClick={() => setViewUser(u)} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700" title="View Details">
+                           <FileText className="w-4 h-4" />
+                         </button>
                          <div className="w-px h-6 bg-zinc-800 mx-1" />
                          <button 
                            onClick={() => setConfirmAction({ type: 'REFRESH', username: u.username })}
@@ -335,7 +327,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
           {/* === INBOX TAB === */}
           {activeTab === 'INBOX' && (
             <div className="space-y-4 max-w-5xl mx-auto">
-              <h3 className="text-xs uppercase font-bold text-zinc-500 mb-4">Requests ({requests.filter(r => r.status === 'PENDING').length} Pending)</h3>
+              <h3 className="text-xs uppercase font-bold text-zinc-500 mb-4">Pending Requests ({requests.filter(r => r.status === 'PENDING').length})</h3>
               
               {requests.length === 0 && <div className="text-zinc-600 text-center py-12 border border-dashed border-zinc-800 rounded">No requests found.</div>}
               
@@ -368,16 +360,18 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
                              {req.status}
                          </span>
                          <p className="text-[10px] text-zinc-600 mt-1 font-mono">{new Date(req.createdAt).toLocaleString()}</p>
+                         {req.approvedAt && <p className="text-[10px] text-green-700">Appr: {new Date(req.approvedAt).toLocaleDateString()}</p>}
+                         {req.rejectedAt && <p className="text-[10px] text-red-700">Rej: {new Date(req.rejectedAt).toLocaleDateString()}</p>}
                       </div>
                    </div>
 
                    {/* Footer Row: Admin Notification Status */}
                    <div className="flex justify-between items-center pt-3 border-t border-zinc-800/50">
                       <div className="flex items-center gap-2 text-[10px]">
-                        <span className="text-zinc-500 font-bold uppercase">Email Status:</span>
-                        {req.notify?.emailStatus === 'SENT' ? (
+                        <span className="text-zinc-500 font-bold uppercase">Admin Notify:</span>
+                        {req.adminNotifyStatus === 'SENT' ? (
                           <span className="text-green-500 flex items-center gap-1"><Check className="w-3 h-3"/> Sent</span>
-                        ) : req.notify?.emailStatus === 'FAILED' ? (
+                        ) : req.adminNotifyStatus === 'FAILED' ? (
                           <div className="flex items-center gap-2">
                              <span className="text-red-500 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> Failed</span>
                              <button 
@@ -391,11 +385,14 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
                         ) : (
                           <span className="text-zinc-500 italic">Pending...</span>
                         )}
+
+                        <span className="text-zinc-500 font-bold uppercase ml-4">User Notify:</span>
+                        {req.userNotifyStatus === 'SENT' ? <span className="text-green-500">Sent</span> : req.userNotifyStatus === 'FAILED' ? <span className="text-red-500">Failed</span> : <span className="text-zinc-600">-</span>}
                       </div>
                       
                       {req.status === 'PENDING' && (
                         <div className="flex gap-2">
-                          <button onClick={() => authService.rejectRequest(currentUser, req.id)} className="px-3 py-1.5 bg-zinc-950 border border-zinc-800 hover:border-red-500 hover:text-red-500 rounded text-xs">Reject</button>
+                          <button onClick={() => authService.rejectRequest(currentUser, req.id).then(refreshData)} className="px-3 py-1.5 bg-zinc-950 border border-zinc-800 hover:border-red-500 hover:text-red-500 rounded text-xs">Reject</button>
                           <button onClick={() => startApproval(req)} className="px-4 py-1.5 bg-gold-600 hover:bg-gold-500 text-black font-bold rounded text-xs flex items-center gap-2">
                             <Check className="w-3 h-3" /> Review & Approve
                           </button>
@@ -423,7 +420,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
                    {auditLogs.map(log => (
                      <tr key={log.id} className="hover:bg-zinc-800/50">
                        <td className="p-3 whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
-                       <td className="p-3 text-gold-500">{log.actorId}</td>
+                       <td className="p-3 text-gold-500">{log.actorId} <span className="opacity-50 text-[10px]">({log.actorRole})</span></td>
                        <td className="p-3 font-bold">{log.action}</td>
                        <td className="p-3 text-zinc-300">{log.details}</td>
                      </tr>
@@ -436,6 +433,26 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
         </div>
 
         {/* ... MODALS ... */}
+        
+        {viewUser && (
+          <div className="absolute inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+             <div className="w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-xl p-6 shadow-2xl">
+               <div className="flex justify-between items-start mb-6">
+                 <div>
+                   <h3 className="text-xl font-bold text-white flex items-center gap-2">{viewUser.username} <span className="text-[10px] bg-zinc-800 px-2 py-1 rounded text-zinc-400 uppercase">{viewUser.role}</span></h3>
+                   <p className="text-xs text-zinc-500 font-mono mt-1">ID: {viewUser.id}</p>
+                 </div>
+                 <button onClick={() => setViewUser(null)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5"/></button>
+               </div>
+               <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="bg-black p-3 rounded border border-zinc-800"><p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">Name</p><p className="text-white">{viewUser.profile.firstName} {viewUser.profile.lastName}</p></div>
+                  <div className="bg-black p-3 rounded border border-zinc-800"><p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">Source</p><p className="text-white">{viewUser.profile.source}</p></div>
+                  <div className="bg-black p-3 rounded border border-zinc-800"><p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">Phone</p><p className="text-white font-mono">{viewUser.phone || '-'}</p></div>
+               </div>
+               <div className="flex justify-end"><button onClick={() => setViewUser(null)} className="bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded text-xs font-bold">Close</button></div>
+             </div>
+          </div>
+        )}
         
         {confirmAction && (
           <div className="absolute inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
@@ -463,6 +480,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
                          onChange={e => setApprovalUsername(e.target.value)}
                          className="w-full bg-black border border-zinc-700 p-3 rounded text-white focus:border-gold-500 outline-none"
                       />
+                      <p className="text-[10px] text-zinc-500">Must be unique. Default is requested preferred name.</p>
                    </div>
                    <div className="bg-zinc-800/50 p-3 rounded border border-zinc-800 text-xs text-zinc-400">
                       <p><strong>Applicant:</strong> {approvingReq.firstName} {approvingReq.lastName}</p>
@@ -495,13 +513,14 @@ export const AdminPanel: React.FC<Props> = ({ currentUser, onClose, addToast }) 
                 <div className="text-gold-500 font-mono text-lg break-all">{credentialModal.token}</div>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-2">
-                 <button onClick={() => handleSendMessage(credentialModal.username, 'SMS', `Access Token: ${credentialModal.token}`)} className="bg-zinc-800 hover:bg-zinc-700 text-white py-2 rounded text-xs font-bold flex items-center justify-center gap-2"><Smartphone className="w-3 h-3"/> Resend SMS</button>
-                 <button onClick={() => handleSendMessage(credentialModal.username, 'EMAIL', `Token: ${credentialModal.token}`)} className="bg-zinc-800 hover:bg-zinc-700 text-white py-2 rounded text-xs font-bold flex items-center justify-center gap-2"><Mail className="w-3 h-3"/> Resend Email</button>
+                 <button onClick={() => handleSendMessage(credentialModal.username, 'SMS', `Access Token for CruzPham Studios: ${credentialModal.token}`)} className="bg-zinc-800 hover:bg-zinc-700 text-white py-2 rounded text-xs font-bold flex items-center justify-center gap-2"><Smartphone className="w-3 h-3"/> Resend SMS</button>
+                 <button onClick={() => handleSendMessage(credentialModal.username, 'EMAIL', `Your Access Token: ${credentialModal.token}`)} className="bg-zinc-800 hover:bg-zinc-700 text-white py-2 rounded text-xs font-bold flex items-center justify-center gap-2"><Mail className="w-3 h-3"/> Resend Email</button>
               </div>
               <button onClick={() => setCredentialModal(null)} className="w-full bg-gold-600 hover:bg-gold-500 text-black font-bold py-3 rounded text-sm mt-4">Done</button>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );

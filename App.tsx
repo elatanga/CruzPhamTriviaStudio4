@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppShell } from './components/AppShell';
 import { ToastContainer } from './components/Toast';
@@ -16,15 +17,12 @@ import { dataService } from './services/dataService';
 import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session } from './types';
 import { soundService } from './services/soundService';
 import { logger } from './services/logger';
-import { firebaseConfigError, projectId, missingKeys } from './services/firebase';
-import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power, AlertTriangle, Terminal, WifiOff } from 'lucide-react';
-import { UpdatePrompt } from './components/UpdatePrompt';
+import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power } from 'lucide-react';
 
 const App: React.FC = () => {
   // App Boot State
   const [isConfigured, setIsConfigured] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [bootError, setBootError] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false); 
   
   const [bootstrapToken, setBootstrapToken] = useState<string | null>(null);
 
@@ -62,9 +60,6 @@ const App: React.FC = () => {
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Get Runtime Config for Footer
-  const runtimeConfig = (typeof window !== 'undefined' ? (window as any).__RUNTIME_CONFIG__ : {});
-
   // --- PERSISTENCE & SYNC ---
   const saveGameState = (state: GameState) => {
     localStorage.setItem('cruzpham_gamestate', JSON.stringify(state));
@@ -86,16 +81,16 @@ const App: React.FC = () => {
     if (session) {
       const uiState = {
         activeShowId: activeShow?.id || null,
-        viewMode: viewMode,
-        isDirectorPoppedOut
+        viewMode: viewMode
       };
       localStorage.setItem('cruzpham_ui_state', JSON.stringify(uiState));
     }
-  }, [activeShow, viewMode, session, isDirectorPoppedOut]);
+  }, [activeShow, viewMode, session]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // 1. Focus Guard: Don't trigger if user is typing in an input
       const active = document.activeElement;
       const tagName = active?.tagName.toLowerCase();
       const isInput = tagName === 'input' || tagName === 'textarea' || (active as HTMLElement)?.isContentEditable;
@@ -103,18 +98,24 @@ const App: React.FC = () => {
 
       const state = gameStateRef.current;
 
+      // 2. Player Selection (Arrows)
       if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
-        e.preventDefault(); 
+        e.preventDefault(); // Prevent page scroll
+        
         if (state.players.length === 0) return;
+        
         const currentIdx = state.players.findIndex(p => p.id === state.selectedPlayerId);
+        // If no player selected (-1), default to 0
         let newIdx = currentIdx === -1 ? 0 : currentIdx;
+
         if (e.code === 'ArrowUp') {
           newIdx = currentIdx - 1;
-          if (newIdx < 0) newIdx = state.players.length - 1; 
+          if (newIdx < 0) newIdx = state.players.length - 1; // Wrap to bottom
         } else {
           newIdx = currentIdx + 1;
-          if (newIdx >= state.players.length) newIdx = 0; 
+          if (newIdx >= state.players.length) newIdx = 0; // Wrap to top
         }
+
         const newId = state.players[newIdx].id;
         if (newId !== state.selectedPlayerId) {
           soundService.playSelect();
@@ -125,10 +126,14 @@ const App: React.FC = () => {
         return;
       }
 
+      // 3. Score Adjustment (+/-)
+      // Checks for '=', '+', '-', '_' to handle both Shift and non-Shift states
       if (['=', '+', '-', '_'].includes(e.key)) {
          if (!state.selectedPlayerId) return;
+         
          const delta = (e.key === '=' || e.key === '+') ? 100 : -100;
          soundService.playClick();
+         
          const newState = {
            ...state,
            players: state.players.map(p => p.id === state.selectedPlayerId ? { ...p, score: p.score + delta } : p)
@@ -142,32 +147,29 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
-  // Admin Notification Listener
+  // Admin Polling
   useEffect(() => {
-    let unsub: (() => void) | undefined;
+    let interval: number;
     if (session?.role === 'ADMIN' || session?.role === 'MASTER_ADMIN') {
-        try {
-          unsub = authService.subscribeToRequests((reqs) => {
-               const pending = reqs.filter(r => r.status === 'PENDING').length;
-               setPendingRequests(prev => {
-                  if (pending > prev) {
-                      soundService.playToast('info');
-                      addToast('info', `New Request: ${pending} Pending`);
-                  }
-                  return pending;
-              });
-          });
-        } catch (e) {
-          logger.warn('SYSTEM', 'Admin notifications unavailable');
-        }
+        const check = () => {
+            const reqs = authService.getRequests();
+            const pending = reqs.filter(r => r.status === 'PENDING').length;
+            setPendingRequests(prev => {
+                if (pending > prev) {
+                    soundService.playToast('info');
+                    addToast('info', `New Request: ${pending} Pending`);
+                }
+                return pending;
+            });
+        };
+        check(); 
+        interval = window.setInterval(check, 30000); // Check every 30s
     }
-    return () => {
-       if (unsub) unsub();
-    };
+    return () => clearInterval(interval);
   }, [session]);
 
   useEffect(() => {
-    // 1. Handle Deep Linking
+    // Check if I am a popout
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('view') === 'director') {
       setIsPopoutView(true);
@@ -175,94 +177,73 @@ const App: React.FC = () => {
       document.title = "Director Panel - CRUZPHAM STUDIOS";
     }
 
+    // Sync Listener
     window.addEventListener('storage', handleStorageChange);
 
+    // SYSTEM STARTUP GATE & HYDRATION
     const initializeApp = async () => {
-       if (firebaseConfigError) {
-         setAuthChecked(true); 
-         return;
-       }
-
-       logger.info('SYSTEM', 'bootstrapStarted');
        try {
-         // --- A. RESTORE SESSION (Parallel to Config Check for Speed) ---
-         // Use new robust storage key
-         const storedSession = localStorage.getItem('cruzpham_user_session');
-         
-         let restoredSession = null;
-         if (storedSession) {
-            try {
-               const parsed = JSON.parse(storedSession);
-               // Re-validate against DB to ensure not revoked
-               const valid = await authService.restoreSession(parsed.username);
-               
-               if (valid.success && valid.session) {
-                 // Restore the session object fully (keep role/username)
-                 restoredSession = { ...parsed, ...valid.session };
-                 setSession(restoredSession);
-               } else {
-                 // Session revoked or invalid
-                 logger.warn('AUTH', 'Session restoration refused', { message: valid.message });
-                 localStorage.removeItem('cruzpham_user_session');
-               }
-            } catch (err: any) {
-               logger.error('AUTH', 'Session parse failed', err);
-            }
-         }
-
-         // --- B. CHECK BOOTSTRAP STATUS ---
-         // If we have a valid session, we assume system is ready, 
-         // but we double check to ensure masterReady flag didn't flip (rare)
+         // Secure Check: Server Truth
          const status = await authService.getBootstrapStatus();
          setIsConfigured(status.masterReady);
 
-         // --- C. RESTORE UI STATE ---
-         if (restoredSession && status.masterReady) {
-            try {
-              const uiStateRaw = localStorage.getItem('cruzpham_ui_state');
-              if (uiStateRaw) {
-                const uiState = JSON.parse(uiStateRaw);
-                
-                // Active Show
-                if (uiState.activeShowId) {
-                  const restoredShow = dataService.getShowById(uiState.activeShowId);
-                  if (restoredShow) {
-                    setActiveShow(restoredShow);
+         if (status.masterReady) {
+            // Restore Persistent Session
+            const storedSessionId = localStorage.getItem('cruzpham_active_session_id');
+            if (storedSessionId) {
+               logger.info('hydrateSessionAttempt', { storedSessionId });
+               const result = await authService.restoreSession(storedSessionId);
+               
+               if (result.success && result.session) {
+                  setSession({ 
+                    id: result.session.id, 
+                    username: result.session.username, 
+                    role: result.session.role 
+                  });
+                  logger.info('hydrateSessionSuccess');
+
+                  // Restore UI State
+                  try {
+                    const uiStateRaw = localStorage.getItem('cruzpham_ui_state');
+                    if (uiStateRaw) {
+                      const uiState = JSON.parse(uiStateRaw);
+                      if (uiState.activeShowId) {
+                        const restoredShow = dataService.getShowById(uiState.activeShowId);
+                        if (restoredShow) {
+                          setActiveShow(restoredShow);
+                          logger.info('hydrateActiveShow', { showId: restoredShow.id });
+                        }
+                      }
+                      if (uiState.viewMode) {
+                        setViewMode(uiState.viewMode);
+                        logger.info('hydrateViewMode', { mode: uiState.viewMode });
+                      }
+                    }
+                  } catch (e) {
+                    logger.warn('hydrateUIStateFailed');
                   }
-                }
-                
-                // View Mode (Respect Popout override)
-                if (uiState.viewMode && !urlParams.get('view')) {
-                  setViewMode(uiState.viewMode);
-                }
-
-                // Director State
-                if (uiState.isDirectorPoppedOut) {
-                   setIsDirectorPoppedOut(true);
-                }
-              }
-            } catch (e) {
-              logger.warn('SYSTEM', 'hydrateUIStateFailed');
-            }
-
-            // Restore Game State
-            const savedState = localStorage.getItem('cruzpham_gamestate');
-            if (savedState) {
-              const parsed = JSON.parse(savedState);
-              setGameState(parsed);
-              // Ghost Show if needed
-              if (parsed.showTitle && !activeShow) {
-                setActiveShow(prev => prev || { id: 'restored-ghost', userId: 'restored', title: parsed.showTitle, createdAt: '' });
-              }
+               } else {
+                 // Invalid session (revoked or expired), clear artifacts
+                 localStorage.removeItem('cruzpham_active_session_id');
+                 localStorage.removeItem('cruzpham_ui_state');
+               }
             }
          }
-
-         logger.info('SYSTEM', 'bootstrapCompleted');
-       } catch (e: any) {
+         
+         // Restore Game State (Always load "Live" state if exists, acts as source of truth for game)
+         const savedState = localStorage.getItem('cruzpham_gamestate');
+         if (savedState) {
+           const parsed = JSON.parse(savedState);
+           setGameState(parsed);
+           // Fallback: If no show active but game has title, create ghost active show for UI consistency
+           if (parsed.showTitle && !activeShow) {
+              setActiveShow(prev => prev || { id: 'restored-ghost', userId: 'restored', title: parsed.showTitle, createdAt: '' });
+           }
+         }
+       } catch (e) {
          console.error("System Initialization Failed", e);
-         setBootError(e.message || "Failed to connect to studio services.");
        } finally {
-         setAuthChecked(true); 
+         setAuthChecked(true); // Allow render
        }
     };
 
@@ -287,6 +268,7 @@ const App: React.FC = () => {
       addToast('success', 'Master Admin Created Successfully');
     } catch (e: any) {
       addToast('error', e.message);
+      // If error is "already complete", refresh state to kick user out of bootstrap UI
       if (e.code === 'ERR_BOOTSTRAP_COMPLETE') {
          setTimeout(() => window.location.reload(), 2000);
       }
@@ -309,6 +291,7 @@ const App: React.FC = () => {
       directorWindowRef.current = win;
       setIsDirectorPoppedOut(true);
       addToast('info', 'Director Panel detached.');
+      logger.info('popoutOpened');
     } else {
       addToast('error', 'Popout blocked. Please allow popups.');
     }
@@ -320,12 +303,12 @@ const App: React.FC = () => {
         directorWindowRef.current = null;
     }
     setIsDirectorPoppedOut(false);
+    logger.info('popoutClosed');
   };
 
   const handleLoginSuccess = (newSession: Session) => {
     setSession({ id: newSession.id, username: newSession.username, role: newSession.role });
-    // Save full session object for robust restore
-    localStorage.setItem('cruzpham_user_session', JSON.stringify(newSession));
+    localStorage.setItem('cruzpham_active_session_id', newSession.id);
     addToast('success', 'Welcome to CruzPham Trivia Studios!');
   };
 
@@ -334,99 +317,194 @@ const App: React.FC = () => {
       authService.logout(session.id);
       setSession(null);
       setActiveShow(null);
-      localStorage.removeItem('cruzpham_user_session'); // Clear Robust Session
+      localStorage.removeItem('cruzpham_active_session_id');
       localStorage.removeItem('cruzpham_ui_state');
       localStorage.removeItem('cruzpham_gamestate');
       setViewMode('BOARD');
     }
   };
 
-  // --- GAME LOGIC (Omitted for brevity, unchanged) ---
-  const handlePlayTemplate = (template: GameTemplate) => { 
-    // Logic from previous version embedded here conceptually (shortened for patch size)
+  // --- GAME LOGIC ---
+
+  const handlePlayTemplate = (template: GameTemplate) => {
+    // Initialize Categories
     const initCategories = template.categories.map(cat => {
+      // Logic to preserve or assign Double Or Nothing
       const hasDouble = cat.questions.some(q => q.isDoubleOrNothing);
       const luckyIndex = !hasDouble ? Math.floor(Math.random() * cat.questions.length) : -1;
+
       return {
         ...cat,
         questions: cat.questions.map((q, idx) => ({
-          ...q, isAnswered: false, isRevealed: false, isVoided: false,
+          ...q,
+          isAnswered: false,
+          isRevealed: false,
+          isVoided: false,
           isDoubleOrNothing: hasDouble ? (q.isDoubleOrNothing || false) : (idx === luckyIndex)
         }))
       };
     });
-    const initPlayers: Player[] = (template.config.playerNames || []).map(name => ({ id: crypto.randomUUID(), name: name, score: 0, color: '#ffffff' }));
+
+    const initPlayers: Player[] = (template.config.playerNames || []).map(name => ({
+      id: crypto.randomUUID(),
+      name: name,
+      score: 0,
+      color: '#ffffff'
+    }));
+
     if (initPlayers.length === 0 && template.config.playerCount > 0) {
-      for (let i = 0; i < template.config.playerCount; i++) initPlayers.push({ id: crypto.randomUUID(), name: `Player ${i + 1}`, score: 0, color: '#ffffff' });
+      for (let i = 0; i < template.config.playerCount; i++) {
+        initPlayers.push({
+          id: crypto.randomUUID(),
+          name: `Player ${i + 1}`,
+          score: 0,
+          color: '#ffffff'
+        });
+      }
     }
-    const newState: GameState = { ...gameState, showTitle: activeShow?.title || '', isGameStarted: true, categories: initCategories, players: initPlayers, activeQuestionId: null, activeCategoryId: null, selectedPlayerId: initPlayers.length > 0 ? initPlayers[0].id : null, history: [`Started: ${template.topic}`], timer: { duration: 30, endTime: null, isRunning: false } };
+
+    const newState: GameState = {
+      ...gameState,
+      showTitle: activeShow?.title || '',
+      isGameStarted: true,
+      categories: initCategories,
+      players: initPlayers,
+      activeQuestionId: null,
+      activeCategoryId: null,
+      selectedPlayerId: initPlayers.length > 0 ? initPlayers[0].id : null,
+      history: [`Started: ${template.topic}`],
+      timer: {
+        duration: 30,
+        endTime: null,
+        isRunning: false
+      }
+    };
     saveGameState(newState);
+    // Switch to board view automatically if in another tab
     if (viewMode !== 'BOARD') setViewMode('BOARD');
   };
 
   const handleEndGame = () => {
     try {
-      if (isDirectorPoppedOut) handleBringBack();
+      logger.info('endGameAttempt', { showId: activeShow?.id });
+
+      // Clean cleanup of Director Window
+      if (isDirectorPoppedOut) {
+         handleBringBack();
+      }
+
+      // Safe Reset of Game State
       setGameState(prev => {
-        const newState: GameState = { ...prev, isGameStarted: false, activeQuestionId: null, activeCategoryId: null, timer: { ...prev.timer, endTime: null, isRunning: false } };
+        const newState: GameState = {
+          ...prev,
+          isGameStarted: false,
+          activeQuestionId: null,
+          activeCategoryId: null,
+          // Reset timer but keep duration preference
+          timer: { ...prev.timer, endTime: null, isRunning: false }
+        };
+        // Persist the closed state immediately
         localStorage.setItem('cruzpham_gamestate', JSON.stringify(newState));
         return newState;
       });
+
+      // Reset View to ensure Dashboard is visible
       setViewMode('BOARD');
+
       setShowEndGameConfirm(false);
       addToast('info', 'Game Session Ended');
-    } catch (e: any) { addToast('error', 'Could not end game cleanly.'); }
+      logger.info('endGameSuccess');
+    } catch (e: any) {
+      logger.error('endGameFail', { error: e });
+      addToast('error', 'Could not end game cleanly.');
+    }
   };
-  const handleSelectQuestion = (catId: string, qId: string) => { saveGameState({ ...gameState, activeCategoryId: catId, activeQuestionId: qId }); };
+
+  const handleSelectQuestion = (catId: string, qId: string) => {
+    const newState = { ...gameState, activeCategoryId: catId, activeQuestionId: qId };
+    saveGameState(newState);
+  };
+
   const handleQuestionClose = (action: 'return' | 'void' | 'award' | 'steal', targetPlayerId?: string) => {
     setGameState(prev => {
       const activeCat = prev.categories.find(c => c.id === prev.activeCategoryId);
       const activeQ = activeCat?.questions.find(q => q.id === prev.activeQuestionId);
       if (!activeCat || !activeQ) return prev;
+
       const points = (activeQ.isDoubleOrNothing ? activeQ.points * 2 : activeQ.points);
+
       const newCategories = prev.categories.map(c => {
         if (c.id !== prev.activeCategoryId) return c;
-        return { ...c, questions: c.questions.map(q => { if (q.id !== prev.activeQuestionId) return q; return { ...q, isRevealed: false, isAnswered: action === 'award' || action === 'steal', isVoided: action === 'void' }; }) };
+        return {
+          ...c,
+          questions: c.questions.map(q => {
+            if (q.id !== prev.activeQuestionId) return q;
+            return {
+              ...q,
+              isRevealed: false, 
+              isAnswered: action === 'award' || action === 'steal',
+              isVoided: action === 'void'
+            };
+          })
+        };
       });
+
       let newPlayers = [...prev.players];
       if ((action === 'award' || action === 'steal') && targetPlayerId) {
         newPlayers = newPlayers.map(p => p.id === targetPlayerId ? { ...p, score: p.score + points } : p);
         addToast('success', `${points} Points to ${newPlayers.find(p => p.id === targetPlayerId)?.name}`);
       }
-      const newState = { ...prev, categories: newCategories, players: newPlayers, activeQuestionId: null, activeCategoryId: null, timer: { ...prev.timer, endTime: null, isRunning: false } };
+      
+      const newState = {
+        ...prev,
+        categories: newCategories,
+        players: newPlayers,
+        activeQuestionId: null,
+        activeCategoryId: null,
+        // Reset timer when question closes
+        timer: {
+           ...prev.timer,
+           endTime: null,
+           isRunning: false
+        }
+      };
       saveGameState(newState);
       return newState;
     });
   };
-  const handleAddPlayer = (name: string) => { setGameState(prev => { const newPlayer: Player = { id: crypto.randomUUID(), name, score: 0, color: '#fff' }; const newState = { ...prev, players: [...prev.players, newPlayer], selectedPlayerId: prev.selectedPlayerId || newPlayer.id }; saveGameState(newState); return newState; }); };
-  const handleUpdateScore = (playerId: string, delta: number) => { setGameState(prev => { const newState = { ...prev, players: prev.players.map(p => p.id === playerId ? { ...p, score: p.score + delta } : p) }; saveGameState(newState); return newState; }); };
-  const handleSelectPlayer = (id: string) => { soundService.playSelect(); setGameState(prev => { const newState = { ...prev, selectedPlayerId: id }; saveGameState(newState); return newState; }); };
+
+  const handleAddPlayer = (name: string) => {
+    setGameState(prev => {
+      const newPlayer: Player = { id: crypto.randomUUID(), name, score: 0, color: '#fff' };
+      const newState = { 
+        ...prev, 
+        players: [...prev.players, newPlayer],
+        selectedPlayerId: prev.selectedPlayerId || newPlayer.id 
+      };
+      saveGameState(newState);
+      return newState;
+    });
+  };
+
+  const handleUpdateScore = (playerId: string, delta: number) => {
+    setGameState(prev => {
+      const newState = { ...prev, players: prev.players.map(p => p.id === playerId ? { ...p, score: p.score + delta } : p) };
+      saveGameState(newState);
+      return newState;
+    });
+  };
+
+  const handleSelectPlayer = (id: string) => {
+    soundService.playSelect();
+    setGameState(prev => {
+      const newState = { ...prev, selectedPlayerId: id };
+      saveGameState(newState);
+      return newState;
+    });
+  };
 
   // --- RENDER ---
   
-  if (firebaseConfigError) {
-    return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-black text-red-500 text-center p-8 space-y-4 font-mono">
-        <AlertTriangle className="w-16 h-16" />
-        <h1 className="text-2xl font-bold uppercase tracking-widest">Configuration Error</h1>
-        <p className="max-w-md text-zinc-400 text-sm">
-          The studio environment is missing required secure keys.
-          <br/>Please contact the administrator or check deployment environment variables.
-        </p>
-        {missingKeys.length > 0 && (
-          <div className="text-xs text-zinc-600 border border-zinc-800 p-4 rounded bg-zinc-900/50 w-full max-w-lg text-left">
-            <strong className="block mb-2 text-zinc-500">MISSING VARIABLES:</strong>
-            <ul className="list-disc pl-4 space-y-1">
-              {missingKeys.map(key => (
-                <li key={key} className="text-red-400 font-bold">{key}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   // 1. Initial Loading Gate
   if (!authChecked) {
     return (
@@ -435,27 +513,6 @@ const App: React.FC = () => {
            <Loader2 className="w-12 h-12 text-gold-500 animate-spin" />
            <p className="text-zinc-500 text-sm uppercase tracking-widest font-bold">Loading Studio...</p>
         </div>
-      </div>
-    );
-  }
-
-  // 1b. Boot Error (Network/Permissions)
-  if (bootError) {
-    return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-black text-white text-center p-8 space-y-6">
-        <div className="p-4 bg-red-900/20 rounded-full border border-red-900">
-           <WifiOff className="w-8 h-8 text-red-500" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold uppercase tracking-widest text-red-500 mb-2">Connection Failure</h1>
-          <p className="max-w-md text-zinc-400 text-sm">{bootError}</p>
-        </div>
-        <button 
-          onClick={() => window.location.reload()}
-          className="bg-zinc-800 hover:bg-gold-600 hover:text-black text-white px-6 py-2 rounded uppercase font-bold tracking-wider transition-colors"
-        >
-          Retry Connection
-        </button>
       </div>
     );
   }
@@ -520,7 +577,6 @@ const App: React.FC = () => {
       onLogout={handleLogout}
       shortcuts={showShortcuts ? <ShortcutsPanel /> : null}
     >
-      <UpdatePrompt />
       <ToastContainer toasts={toasts} removeToast={removeToast} />
       <ConfirmationModal 
          isOpen={showEndGameConfirm}
@@ -540,30 +596,18 @@ const App: React.FC = () => {
           {!activeShow ? (
             <>
                <ShowSelection username={session.username} onSelectShow={setActiveShow} />
-               
-               {/* Admin/Dev Status Footer (Only Visible if Admin or Dev) */}
-               {(isAdmin || process.env.NODE_ENV === 'development') && (
-                 <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2 pointer-events-none">
-                   <div className="pointer-events-auto">
-                     {isAdmin && (
-                        <button onClick={() => setViewMode('ADMIN')} className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-500 hover:text-gold-500 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-full transition-all relative group">
-                          <Shield className="w-3 h-3" /> Admin Console
-                          {pendingRequests > 0 && (
-                            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-bounce shadow-lg shadow-red-500/50">
-                              {pendingRequests}
-                            </span>
-                          )}
-                        </button>
+               {isAdmin && (
+                 <div className="absolute bottom-4 right-4">
+                   <button onClick={() => setViewMode('ADMIN')} className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-500 hover:text-gold-500 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-full transition-all relative group">
+                     <Shield className="w-3 h-3" /> Admin Console
+                     {pendingRequests > 0 && (
+                       <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-bounce shadow-lg shadow-red-500/50">
+                         {pendingRequests}
+                       </span>
                      )}
-                   </div>
-                   {/* Debug Footer */}
-                   <div className="text-[9px] text-zinc-700 font-mono bg-black/50 px-2 py-1 rounded flex items-center gap-2 border border-zinc-900/50 backdrop-blur-sm">
-                     <Terminal className="w-3 h-3" />
-                     PID: {projectId || 'Unknown'} | v{runtimeConfig?.BUILD_VERSION || process.env.REACT_APP_VERSION || '1.0.0'}
-                   </div>
+                   </button>
                  </div>
                )}
-
                {viewMode === 'ADMIN' && (
                  <div className="fixed inset-0 z-50 animate-in fade-in slide-in-from-bottom duration-300">
                     <AdminPanel currentUser={session.username} onClose={() => setViewMode('BOARD')} addToast={addToast} />

@@ -3,11 +3,6 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { Category, Question, Difficulty, AppError } from "../types";
 import { logger } from "./logger";
 
-// Access runtime config
-const runtimeConfig = (typeof window !== 'undefined' ? (window as any).__RUNTIME_CONFIG__ : {}) as any;
-// Prefer runtime config, fallback to process.env (for local dev/tests if script fails)
-const apiKey = runtimeConfig?.API_KEY || process.env.API_KEY;
-
 // Helper to generate IDs
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -47,7 +42,7 @@ async function withRetry<T>(operation: () => Promise<T>, retries = 2): Promise<T
       return await operation();
     } catch (err: any) {
       lastError = err;
-      logger.warn('AI', `AI Operation failed (attempt ${i + 1}/${retries + 1})`, err);
+      logger.warn(`AI Operation failed (attempt ${i + 1}/${retries + 1})`, err);
       // If 4xx (client error), do not retry unless it's 429 (rate limit)
       if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) {
         throw new AppError('ERR_FORBIDDEN', 'AI Request Rejected: ' + (err.message || 'Client Error'), logger.getCorrelationId());
@@ -67,10 +62,10 @@ export const generateTriviaGame = async (
   numQuestions: number = 5,
   pointScale: number = 100
 ): Promise<Category[]> => {
-  logger.info('AI', `Generating trivia: ${topic} (${numCategories}x${numQuestions}, ${difficulty}, scale=${pointScale})`);
+  logger.info(`Generating trivia: ${topic} (${numCategories}x${numQuestions}, ${difficulty}, scale=${pointScale})`);
 
-  if (!apiKey) throw new AppError('ERR_FORBIDDEN', "Missing API Key", logger.getCorrelationId());
-  const ai = new GoogleGenAI({ apiKey: apiKey });
+  if (!process.env.API_KEY) throw new AppError('ERR_FORBIDDEN', "Missing API Key", logger.getCorrelationId());
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   return withRetry(async () => {
     try {
@@ -160,8 +155,8 @@ export const generateSingleQuestion = async (
   categoryContext: string,
   difficulty: Difficulty = 'mixed'
 ): Promise<{text: string, answer: string}> => {
-  if (!apiKey) throw new AppError('ERR_FORBIDDEN', "Missing API Key", logger.getCorrelationId());
-  const ai = new GoogleGenAI({ apiKey: apiKey });
+  if (!process.env.API_KEY) throw new AppError('ERR_FORBIDDEN', "Missing API Key", logger.getCorrelationId());
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   return withRetry(async () => {
     const response = await ai.models.generateContent({
@@ -194,8 +189,8 @@ export const generateCategoryQuestions = async (
   difficulty: Difficulty,
   pointScale: number = 100
 ): Promise<Question[]> => {
-  if (!apiKey) throw new AppError('ERR_FORBIDDEN', "Missing API Key", logger.getCorrelationId());
-  const ai = new GoogleGenAI({ apiKey: apiKey });
+  if (!process.env.API_KEY) throw new AppError('ERR_FORBIDDEN', "Missing API Key", logger.getCorrelationId());
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   return withRetry(async () => {
     const response = await ai.models.generateContent({

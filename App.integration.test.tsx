@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import App from './App';
@@ -151,13 +150,13 @@ describe('CRUZPHAM TRIVIA - Network Integration Tests', () => {
     });
 
     // 5. Assert Backend State
-    const storedRequests = await authService.getRequests();
+    const storedRequests = authService.getRequests();
     expect(storedRequests).toHaveLength(1);
     expect(storedRequests[0].preferredUsername).toBe('requester_1');
     expect(storedRequests[0].status).toBe('PENDING');
     
     // Ensure admin notification status was initialized
-    expect(storedRequests[0].notify).toBeDefined();
+    expect(storedRequests[0].adminNotifyStatus).toBeDefined();
   });
 
   // 4) Approve Request -> User Login Test

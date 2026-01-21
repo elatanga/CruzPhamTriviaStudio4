@@ -135,10 +135,9 @@ describe('API Contract Tests (Auth Service)', () => {
       
       expect(req.id).toBeTruthy();
       expect(req.status).toBe('PENDING');
-      expect(req.notify).toBeDefined(); // Should have triggered async notify
+      expect(req.adminNotifyStatus).toBeDefined(); // Should have triggered async notify
 
-      const requests = await authService.getRequests();
-      const stored = requests.find(r => r.id === req.id);
+      const stored = authService.getRequests().find(r => r.id === req.id);
       expect(stored).toBeDefined();
     });
 
@@ -183,8 +182,7 @@ describe('API Contract Tests (Auth Service)', () => {
       expect(result.rawToken).toMatch(/^pk-/);
       expect(result.user.role).toBe('PRODUCER');
 
-      const requests = await authService.getRequests();
-      const req = requests.find(r => r.id === reqId);
+      const req = authService.getRequests().find(r => r.id === reqId);
       expect(req?.status).toBe('APPROVED');
       expect(req?.userId).toBe(result.user.id);
     });
@@ -199,12 +197,11 @@ describe('API Contract Tests (Auth Service)', () => {
     test('Rejection logic updates status only', async () => {
       await authService.rejectRequest('master', reqId);
       
-      const requests = await authService.getRequests();
-      const req = requests.find(r => r.id === reqId);
+      const req = authService.getRequests().find(r => r.id === reqId);
       expect(req?.status).toBe('REJECTED');
       
       // Ensure no user created
-      const users = await authService.getAllUsers();
+      const users = authService.getAllUsers();
       expect(users.find(u => u.username === 'applicant')).toBeUndefined();
     });
 

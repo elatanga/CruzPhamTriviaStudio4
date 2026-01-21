@@ -1,5 +1,4 @@
 
-
 export interface Question {
   id: string;
   text: string;
@@ -43,12 +42,10 @@ export interface GameState {
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
-export type LogCategory = 'AUTH' | 'FIRESTORE' | 'CONFIG' | 'NETWORK' | 'SYSTEM' | 'GAME' | 'AI';
 
 export interface LogEntry {
   timestamp: string;
   level: LogLevel;
-  category: LogCategory;
   message: string;
   correlationId: string;
   data?: any;
@@ -75,8 +72,7 @@ export type ErrorCode =
   | 'ERR_BOOTSTRAP_COMPLETE'
   | 'ERR_VALIDATION'
   | 'ERR_REQUEST_NOT_FOUND'
-  | 'ERR_REQUEST_ALREADY_PROCESSED'
-  | 'ERR_FIREBASE_CONFIG';
+  | 'ERR_REQUEST_ALREADY_PROCESSED';
 
 export class AppError extends Error {
   public code: ErrorCode;
@@ -146,15 +142,6 @@ export interface Session {
   userAgent: string;
 }
 
-export interface DeliveryStatus {
-  emailStatus: 'PENDING' | 'SENT' | 'FAILED';
-  smsStatus: 'PENDING' | 'SENT' | 'FAILED';
-  emailProviderId?: string;
-  smsProviderId?: string;
-  lastError?: string;
-  attempts: number;
-}
-
 export interface TokenRequest {
   id: string;
   firstName: string;
@@ -170,8 +157,13 @@ export interface TokenRequest {
   rejectedAt?: string;
   userId?: string; // Linked user after approval
 
-  // Backend Notification Status (Firestore source of truth)
-  notify: DeliveryStatus;
+  // Admin Notification (New Request Alert)
+  adminNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
+  adminNotifyError?: string;
+
+  // User Notification (Approval/Rejection)
+  userNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
+  userNotifyError?: string;
 }
 
 export interface AuthResponse {
@@ -198,8 +190,7 @@ export type AuditAction =
   | 'REQUEST_APPROVED'
   | 'REQUEST_REJECTED'
   | 'REQUEST_SUBMITTED'
-  | 'ADMIN_NOTIFIED'
-  | 'RETRY_NOTIFY';
+  | 'ADMIN_NOTIFIED';
 
 export interface AuditLogEntry {
   id: string;
