@@ -147,25 +147,29 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
-  // Admin Polling
+  // Admin Notification Listener
   useEffect(() => {
-    let interval: number;
+    let unsub: (() => void) | undefined;
     if (session?.role === 'ADMIN' || session?.role === 'MASTER_ADMIN') {
-        const check = () => {
-            const reqs = authService.getRequests();
-            const pending = reqs.filter(r => r.status === 'PENDING').length;
-            setPendingRequests(prev => {
-                if (pending > prev) {
-                    soundService.playToast('info');
-                    addToast('info', 'New Access Request Received');
-                }
-                return pending;
-            });
-        };
-        check(); 
-        interval = window.setInterval(check, 30000); // Check every 30s
+        try {
+          unsub = authService.subscribeToRequests((reqs) => {
+               const pending = reqs.filter(r => r.status === 'PENDING').length;
+               setPendingRequests(prev => {
+                  if (pending > prev) {
+                      soundService.playToast('info');
+                      addToast('info', `New Request: ${pending} Pending`);
+                  }
+                  return pending;
+              });
+          });
+        } catch (e) {
+          // Backend unavailable
+          logger.warn('Admin notifications unavailable');
+        }
     }
-    return () => clearInterval(interval);
+    return () => {
+       if (unsub) unsub();
+    };
   }, [session]);
 
   useEffect(() => {
@@ -309,7 +313,7 @@ const App: React.FC = () => {
   const handleLoginSuccess = (newSession: Session) => {
     setSession({ id: newSession.id, username: newSession.username, role: newSession.role });
     localStorage.setItem('cruzpham_active_session_id', newSession.id);
-    addToast('success', 'Welcome back.');
+    addToast('success', 'Welcome to CruzPham Trivia Studios!');
   };
 
   const handleLogout = () => {
@@ -511,7 +515,7 @@ const App: React.FC = () => {
       <div className="h-screen w-screen flex items-center justify-center bg-black text-white">
         <div className="flex flex-col items-center gap-4">
            <Loader2 className="w-12 h-12 text-gold-500 animate-spin" />
-           <p className="text-zinc-500 text-sm uppercase tracking-widest font-bold">Initializing Studio...</p>
+           <p className="text-zinc-500 text-sm uppercase tracking-widest font-bold">Loading Studio...</p>
         </div>
       </div>
     );
@@ -530,6 +534,7 @@ const App: React.FC = () => {
             Create Master Admin
           </button>
         </div>
+        <div className="absolute bottom-4 text-xs text-zinc-600">Ensure Firebase is configured</div>
       </div>
     );
   }

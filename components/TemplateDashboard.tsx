@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Play, Trash2, ArrowLeftRight, Loader2, Gamepad2, Download, Upload, Edit } from 'lucide-react';
 import { dataService } from '../services/dataService';
@@ -110,6 +111,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
       {/* Dashboard Header */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-zinc-800 pb-4 gap-4">
         <div>
+          <p className="text-[10px] text-gold-500 font-bold uppercase tracking-widest mb-1">Step 2 of 3</p>
           <h2 className="text-2xl font-serif text-white">Template Library</h2>
           <p className="text-zinc-500 text-xs uppercase tracking-wider mt-1">
             {templates.length} / 40 Slots Used
@@ -150,7 +152,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
           <div className="bg-black p-3 rounded-full mb-3 group-hover:scale-110 transition-transform">
             <Plus className="w-6 h-6" />
           </div>
-          <span className="font-bold uppercase tracking-wider text-sm">New Template</span>
+          <span className="font-bold uppercase tracking-wider text-sm">Create Template</span>
         </button>
 
         {/* Existing Templates */}

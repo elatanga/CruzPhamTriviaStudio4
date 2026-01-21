@@ -72,7 +72,8 @@ export type ErrorCode =
   | 'ERR_BOOTSTRAP_COMPLETE'
   | 'ERR_VALIDATION'
   | 'ERR_REQUEST_NOT_FOUND'
-  | 'ERR_REQUEST_ALREADY_PROCESSED';
+  | 'ERR_REQUEST_ALREADY_PROCESSED'
+  | 'ERR_FIREBASE_CONFIG';
 
 export class AppError extends Error {
   public code: ErrorCode;
@@ -142,6 +143,15 @@ export interface Session {
   userAgent: string;
 }
 
+export interface DeliveryStatus {
+  emailStatus: 'PENDING' | 'SENT' | 'FAILED';
+  smsStatus: 'PENDING' | 'SENT' | 'FAILED';
+  emailProviderId?: string;
+  smsProviderId?: string;
+  lastError?: string;
+  attempts: number;
+}
+
 export interface TokenRequest {
   id: string;
   firstName: string;
@@ -157,13 +167,8 @@ export interface TokenRequest {
   rejectedAt?: string;
   userId?: string; // Linked user after approval
 
-  // Admin Notification (New Request Alert)
-  adminNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
-  adminNotifyError?: string;
-
-  // User Notification (Approval/Rejection)
-  userNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
-  userNotifyError?: string;
+  // Backend Notification Status (Firestore source of truth)
+  notify: DeliveryStatus;
 }
 
 export interface AuthResponse {
@@ -190,7 +195,8 @@ export type AuditAction =
   | 'REQUEST_APPROVED'
   | 'REQUEST_REJECTED'
   | 'REQUEST_SUBMITTED'
-  | 'ADMIN_NOTIFIED';
+  | 'ADMIN_NOTIFIED'
+  | 'RETRY_NOTIFY';
 
 export interface AuditLogEntry {
   id: string;

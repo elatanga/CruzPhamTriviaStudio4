@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Check, Copy, Loader2, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+import { X, Check, Copy, Loader2, ArrowRight, ShieldCheck, AlertCircle, RefreshCw } from 'lucide-react';
 import { authService } from '../services/authService';
 import { TokenRequest, AppError } from '../types';
 
@@ -46,10 +46,10 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
       setStep('SUCCESS');
       onSuccess(); 
     } catch (err: any) {
-      if (err instanceof AppError && err.code === 'ERR_VALIDATION') {
+      if (err instanceof AppError && (err.code === 'ERR_VALIDATION' || err.code === 'ERR_FIREBASE_CONFIG')) {
         setError(err.message);
       } else {
-        setError('Submission failed. Please try again.');
+        setError('Submission failed. Check connection.');
         console.error(err);
       }
     } finally {
@@ -74,7 +74,7 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
             </div>
           </div>
           <div className="text-[10px] text-zinc-600 font-mono">
-            ID: AUTH-SYS-v2.4
+            ID: AUTH-SYS-v2.4 (FIREBASE)
           </div>
         </div>
 
@@ -144,7 +144,7 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
               <div>
                 <h2 className="text-2xl font-serif text-white mb-2">Request Received</h2>
                 <p className="text-zinc-400 text-sm max-w-xs mx-auto mb-2">
-                  Your profile has been securely logged.
+                  Your profile has been securely logged to our database.
                 </p>
                 <p className="text-gold-500 font-bold text-sm bg-gold-900/20 px-3 py-1 rounded inline-block border border-gold-900/50">
                   Payment Verification Pending
@@ -160,18 +160,9 @@ export const TokenRequestModal: React.FC<Props> = ({ onClose, onSuccess }) => {
                   </button>
                 </div>
               </div>
-
-              <div className="bg-blue-900/20 border-l-2 border-blue-500 p-3 text-left w-full text-xs text-blue-300 space-y-2">
-                <p className="font-bold text-blue-200">Next Steps:</p>
-                <ul className="list-disc pl-4 space-y-1 opacity-80">
-                  <li>Our team will verify your identity via TikTok/SMS.</li>
-                  <li>Once payment is confirmed, your token will be sent to <strong>{formData.phone}</strong>.</li>
-                  <li>Expect contact within 24 hours.</li>
-                </ul>
-              </div>
-
+              
               <button onClick={onClose} className="text-zinc-400 hover:text-white text-sm underline">
-                Return to Login
+                  Return to Login
               </button>
             </div>
           )}

@@ -87,7 +87,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess, addToast }) => {
               disabled={isLoading || !username || !token}
               className="w-full mt-2 bg-gradient-to-r from-gold-600 to-gold-500 hover:brightness-110 text-black font-bold py-3.5 rounded-lg shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wider text-sm"
             >
-              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Enter Studio'}
+              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Login'}
             </button>
           </form>
 
@@ -97,7 +97,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess, addToast }) => {
               onClick={() => setShowRequestModal(true)}
               className="group text-gold-500 hover:text-gold-300 text-sm font-medium flex items-center justify-center gap-2 mx-auto transition-colors"
             >
-              <span className="border-b border-transparent group-hover:border-gold-300">Request Access Token</span> <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+              <span className="border-b border-transparent group-hover:border-gold-300">Get Token</span> <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </button>
           </div>
         </div>

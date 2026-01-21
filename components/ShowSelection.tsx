@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Plus, PlaySquare, Film, Loader2 } from 'lucide-react';
 import { dataService } from '../services/dataService';
@@ -37,10 +38,13 @@ export const ShowSelection: React.FC<Props> = ({ username, onSelectShow }) => {
   return (
     <div className="h-full flex flex-col items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
       <div className="w-full max-w-2xl">
-        <h2 className="text-3xl font-serif text-white mb-2 text-center">Select Production</h2>
-        <p className="text-zinc-500 text-center text-sm mb-8 uppercase tracking-widest">
-          Choose a show to manage its templates
-        </p>
+        <div className="text-center mb-8">
+          <p className="text-[10px] text-gold-500 font-bold uppercase tracking-widest mb-2">Step 1 of 3</p>
+          <h2 className="text-3xl font-serif text-white mb-2">Select Production</h2>
+          <p className="text-zinc-500 text-sm uppercase tracking-widest">
+            Choose a show to manage its templates
+          </p>
+        </div>
 
         {/* Create New Show Bar */}
         <form onSubmit={handleCreate} className="mb-8 flex gap-2">
@@ -66,8 +70,8 @@ export const ShowSelection: React.FC<Props> = ({ username, onSelectShow }) => {
           {shows.length === 0 && (
             <div className="col-span-full text-center py-12 border border-dashed border-zinc-800 rounded bg-zinc-900/30">
               <Film className="w-12 h-12 text-zinc-700 mx-auto mb-3" />
-              <p className="text-zinc-500">No active productions found.</p>
-              <p className="text-zinc-600 text-xs mt-1">Create a show above to begin.</p>
+              <p className="text-zinc-500 font-bold">No active productions found.</p>
+              <p className="text-zinc-600 text-xs mt-1">Create a new show above to get started.</p>
             </div>
           )}
           

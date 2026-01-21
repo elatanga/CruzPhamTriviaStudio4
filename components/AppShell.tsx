@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { LogOut, Volume2, VolumeX, Sliders } from 'lucide-react';
+import { LogOut, Volume2, VolumeX, Sliders, HelpCircle } from 'lucide-react';
 import { soundService } from '../services/soundService';
 import { ConnectionStatus } from './ConnectionStatus';
+import { HelpModal } from './HelpModal';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -15,6 +17,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children, activeShowTitle, u
   const [muted, setMuted] = useState(soundService.getMute());
   const [volume, setVolume] = useState(soundService.getVolume());
   const [showVolSlider, setShowVolSlider] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const sliderRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,6 +55,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children, activeShowTitle, u
       <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-gold-900/10 via-transparent to-transparent pointer-events-none z-0" />
       
       <ConnectionStatus />
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
 
       {/* HEADER: Fixed Height */}
       <header className="flex-none h-14 md:h-16 z-10 bg-gradient-to-b from-black via-black/95 to-transparent px-4 md:px-6 flex items-center justify-between border-b border-gold-900/30">
@@ -73,15 +77,26 @@ export const AppShell: React.FC<AppShellProps> = ({ children, activeShowTitle, u
 
           {/* Right: User */}
           <div className="flex items-center gap-4 flex-none">
-            {username && onLogout && (
+            {username && (
               <>
-                <span className="text-zinc-500 font-mono text-[10px] hidden lg:inline">PRODUCER: <span className="text-gold-400">{username}</span></span>
-                <button 
-                  onClick={() => { soundService.playClick(); onLogout(); }}
-                  className="flex items-center gap-2 text-red-500 hover:text-red-400 transition-colors text-xs font-bold uppercase"
-                >
-                  <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Logout</span>
-                </button>
+                 <button 
+                  onClick={() => { soundService.playClick(); setShowHelp(true); }}
+                  className="text-zinc-500 hover:text-gold-500 transition-colors"
+                  title="Studio Guide"
+                 >
+                   <HelpCircle className="w-5 h-5" />
+                 </button>
+                 {onLogout && (
+                  <>
+                    <span className="text-zinc-500 font-mono text-[10px] hidden lg:inline">PRODUCER: <span className="text-gold-400">{username}</span></span>
+                    <button 
+                      onClick={() => { soundService.playClick(); onLogout(); }}
+                      className="flex items-center gap-2 text-red-500 hover:text-red-400 transition-colors text-xs font-bold uppercase"
+                    >
+                      <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Logout</span>
+                    </button>
+                  </>
+                 )}
               </>
             )}
           </div>
