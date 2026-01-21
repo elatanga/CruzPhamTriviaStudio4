@@ -4,15 +4,21 @@ import { getFirestore, Firestore } from 'firebase/firestore';
 import { getFunctions, Functions } from 'firebase/functions';
 import { logger } from './logger';
 
-// 1. Strict Configuration - No Fallbacks
+const runtimeConfig = (window as any).__RUNTIME_CONFIG__;
+
+if (!runtimeConfig) {
+  throw new Error("Runtime configuration missing");
+}
+
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
+  apiKey: runtimeConfig.REACT_APP_FIREBASE_API_KEY,
+  authDomain: runtimeConfig.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: runtimeConfig.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: runtimeConfig.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: runtimeConfig.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: runtimeConfig.REACT_APP_FIREBASE_APP_ID,
 };
+
 
 let app: FirebaseApp | undefined;
 let db: Firestore | undefined;
