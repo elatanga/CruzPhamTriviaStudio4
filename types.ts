@@ -1,4 +1,5 @@
 
+
 export interface Question {
   id: string;
   text: string;
@@ -42,10 +43,12 @@ export interface GameState {
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
+export type LogCategory = 'AUTH' | 'FIRESTORE' | 'CONFIG' | 'NETWORK' | 'SYSTEM' | 'GAME' | 'AI';
 
 export interface LogEntry {
   timestamp: string;
   level: LogLevel;
+  category: LogCategory;
   message: string;
   correlationId: string;
   data?: any;

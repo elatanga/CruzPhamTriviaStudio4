@@ -51,28 +51,53 @@ class AuthService {
   // --- BOOTSTRAP SYSTEM ---
 
   async getBootstrapStatus(): Promise<{ masterReady: boolean }> {
+    const _db = this.checkDb();
+    
+    // Strategy: Try Cloud Function first (Correct way), fallback to Direct Read (Fast/Offline way)
     try {
-      // Use Cloud Function to avoid permission denied on unauthed read
       const fns = this.checkFunctions();
       const getStatus = httpsCallable<{ }, { masterReady: boolean }>(fns, 'getSystemStatus');
       const result = await getStatus({});
       return result.data;
-    } catch (e: any) {
-      logger.warn('Bootstrap Check Failed (Function)', e);
-      // Fallback only if function fails (e.g. offline), though this might hit permission error
-      // Ideally we fail safe to "System Not Ready" or retry
-      return { masterReady: false };
+    } catch (fnError: any) {
+      logger.warn('CONFIG', 'Bootstrap Function Failed - Attempting Direct Read', { error: fnError.message });
+      
+      try {
+        // Fallback: Check Firestore directly
+        const docRef = doc(_db, COLLECTIONS.BOOTSTRAP, 'config');
+        const snap = await getDoc(docRef);
+        
+        if (snap.exists()) {
+          return { masterReady: snap.data().masterReady === true };
+        }
+        // If doc doesn't exist, system is NOT ready
+        return { masterReady: false };
+      } catch (dbError: any) {
+        // Detailed error reporting for debugging permission issues
+        logger.error('CONFIG', 'Bootstrap Critical Failure', { 
+           fnError: fnError.message, 
+           dbError: dbError.message,
+           code: dbError.code 
+        });
+
+        if (dbError.code === 'permission-denied') {
+          throw new AppError('ERR_FORBIDDEN', 'Access to System Config Denied. Check Firestore Rules.', logger.getCorrelationId());
+        }
+        if (dbError.code === 'unavailable') {
+           throw new AppError('ERR_NETWORK', 'Database Unreachable.', logger.getCorrelationId());
+        }
+        
+        throw dbError; 
+      }
     }
   }
 
   async bootstrapMasterAdmin(username: string): Promise<string> {
-    // This is a sensitive operation, usually done via CLI or strict rule
-    // For this app, we call a backend function to ensure atomicity
     const fns = this.checkFunctions();
-    const bootstrapFn = httpsCallable<{ username: string }, { token: string }>(fns, 'bootstrapSystem');
+    const bootstrapFn = httpsCallable<{ username: string, correlationId: string }, { token: string }>(fns, 'bootstrapSystem');
     
     try {
-      const result = await bootstrapFn({ username });
+      const result = await bootstrapFn({ username, correlationId: logger.getCorrelationId() });
       return result.data.token;
     } catch (e: any) {
       throw new AppError('ERR_BOOTSTRAP_COMPLETE', e.message, logger.getCorrelationId());
@@ -84,46 +109,93 @@ class AuthService {
   async login(username: string, token: string): Promise<AuthResponse> {
     const _db = this.checkDb();
     
-    const q = query(collection(_db, COLLECTIONS.USERS), where("username", "==", username));
-    const snap = await getDocs(q);
+    try {
+      const q = query(collection(_db, COLLECTIONS.USERS), where("username", "==", username));
+      const snap = await getDocs(q);
 
-    if (snap.empty) {
-      return { success: false, message: 'Invalid credentials.', code: 'ERR_INVALID_CREDENTIALS' };
-    }
-
-    const userDoc = snap.docs[0];
-    const user = userDoc.data() as User;
-
-    if (user.status === 'REVOKED') {
-      return { success: false, message: 'Account access revoked.', code: 'ERR_FORBIDDEN' };
-    }
-
-    const inputHash = await hashToken(token);
-    if (inputHash !== user.tokenHash) {
-      logger.warn(`Failed login attempt for ${username}`);
-      return { success: false, message: 'Invalid credentials.', code: 'ERR_INVALID_CREDENTIALS' };
-    }
-
-    await this.logAction(user, 'LOGIN', 'User logged in', { userAgent: navigator.userAgent });
-    
-    return { 
-      success: true, 
-      session: {
-        id: crypto.randomUUID(),
-        username: user.username,
-        role: user.role,
-        createdAt: Date.now(),
-        userAgent: navigator.userAgent
+      if (snap.empty) {
+        return { success: false, message: 'Invalid credentials.', code: 'ERR_INVALID_CREDENTIALS' };
       }
-    };
+
+      const userDoc = snap.docs[0];
+      const user = userDoc.data() as User;
+
+      if (user.status === 'REVOKED') {
+        return { success: false, message: 'Account access revoked.', code: 'ERR_FORBIDDEN' };
+      }
+
+      const inputHash = await hashToken(token);
+      if (inputHash !== user.tokenHash) {
+        logger.warn('AUTH', `Failed login attempt for ${username}`);
+        return { success: false, message: 'Invalid credentials.', code: 'ERR_INVALID_CREDENTIALS' };
+      }
+
+      await this.logAction(user, 'LOGIN', 'User logged in', { userAgent: navigator.userAgent });
+      
+      return { 
+        success: true, 
+        session: {
+          id: crypto.randomUUID(),
+          username: user.username,
+          role: user.role,
+          createdAt: Date.now(),
+          userAgent: navigator.userAgent
+        }
+      };
+    } catch (e: any) {
+      if (e.code === 'permission-denied') {
+        logger.error('AUTH', 'Login Permission Denied - Check Firestore Rules for /users');
+        return { success: false, message: 'System Permission Error', code: 'ERR_FORBIDDEN' };
+      }
+      throw e;
+    }
   }
 
   async logout(sessionId: string): Promise<void> {
-    logger.info('User logout', { sessionId });
+    logger.info('AUTH', 'User logout', { sessionId });
   }
 
-  async restoreSession(sessionId: string): Promise<AuthResponse> {
-     return { success: true }; 
+  /**
+   * Revalidates a user session. 
+   * Includes Offline Fallback: If network is down, trust the session.
+   */
+  async restoreSession(username: string): Promise<AuthResponse> {
+    const _db = this.checkDb();
+    
+    try {
+      const q = query(collection(_db, COLLECTIONS.USERS), where("username", "==", username));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        return { success: false, message: 'User not found' };
+      }
+
+      const user = snap.docs[0].data() as User;
+      
+      if (user.status === 'REVOKED') {
+         return { success: false, message: 'Access Revoked' };
+      }
+      
+      // Return a reconstructed session object
+      return { 
+        success: true,
+        session: {
+            id: 'restored', 
+            username: user.username, 
+            role: user.role, 
+            createdAt: Date.now(), 
+            userAgent: navigator.userAgent 
+        }
+      };
+    } catch (e: any) {
+       // OFFLINE SUPPORT: If we can't reach Firebase, assume session is valid to prevent lockout
+       if (e.code === 'unavailable' || e.message.includes('offline')) {
+           logger.warn('AUTH', 'Restoring session in OFFLINE mode');
+           return { success: true, message: 'Offline Mode' };
+       }
+       logger.error('AUTH', 'Session restore failed', e);
+       return { success: false, message: e.message };
+    }
   }
 
   // --- ADMIN & USER MANAGEMENT ---
@@ -184,7 +256,7 @@ class AuthService {
       });
       callback(reqs);
     }, (err) => {
-      logger.error('Requests Listener Error', err);
+      logger.error('FIRESTORE', 'Requests Listener Error', err);
     });
 
     return this._reqUnsub;
@@ -197,6 +269,8 @@ class AuthService {
     this._auditUnsub = onSnapshot(q, (snap) => {
       const logs = snap.docs.map(d => d.data() as AuditLogEntry);
       callback(logs);
+    }, (err) => {
+       logger.warn('FIRESTORE', 'Audit Log Access Denied', err);
     });
     return this._auditUnsub;
   }
@@ -227,8 +301,7 @@ class AuthService {
     const createReq = httpsCallable<any, TokenRequest>(fns, 'createTokenRequest');
     
     try {
-      const result = await createReq({ ...data });
-      // We return the result from server which should match the interface
+      const result = await createReq({ ...data, correlationId: logger.getCorrelationId() });
       return result.data;
     } catch (e: any) {
       throw new AppError('ERR_NETWORK', 'Failed to submit request: ' + e.message, logger.getCorrelationId());
@@ -241,7 +314,7 @@ class AuthService {
     const fns = this.checkFunctions();
     const retryFn = httpsCallable(fns, 'retryNotification');
     try {
-      await retryFn({ requestId: reqId });
+      await retryFn({ requestId: reqId, correlationId: logger.getCorrelationId() });
       await this.logAction('ADMIN', 'RETRY_NOTIFY', `Retried notification for ${reqId}`);
     } catch (e: any) {
       throw new AppError('ERR_PROVIDER_DOWN', e.message, logger.getCorrelationId());
@@ -333,7 +406,7 @@ class AuthService {
     const fns = this.checkFunctions();
     const sendFn = httpsCallable(fns, 'sendManualNotification');
     try {
-        await sendFn({ targetUsername, method, content });
+        await sendFn({ targetUsername, method, content, correlationId: logger.getCorrelationId() });
         await this.logAction(actorUsername, method === 'EMAIL' ? 'MESSAGE_SENT_EMAIL' : 'MESSAGE_SENT_SMS', `Sent ${method} to ${targetUsername}`);
     } catch (e: any) {
         throw new AppError('ERR_PROVIDER_DOWN', e.message, logger.getCorrelationId());
@@ -358,8 +431,11 @@ class AuthService {
         details,
         metadata
       };
-      addDoc(collection(_db, COLLECTIONS.AUDIT), { ...entry, timestamp: serverTimestamp() }).catch(e => console.error(e));
-      logger.info(`[Audit] ${action}: ${details}`, { ...metadata, actorId });
+      // Fire-and-forget log, but catch error so app doesn't crash
+      addDoc(collection(_db, COLLECTIONS.AUDIT), { ...entry, timestamp: serverTimestamp() }).catch(e => {
+        logger.warn('FIRESTORE', 'Failed to write audit log', e);
+      });
+      logger.info('AUTH', `[Audit] ${action}: ${details}`, { ...metadata, actorId });
     } catch (e) {
       // ignore log failures
     }

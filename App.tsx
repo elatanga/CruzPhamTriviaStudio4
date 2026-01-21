@@ -17,14 +17,15 @@ import { dataService } from './services/dataService';
 import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session } from './types';
 import { soundService } from './services/soundService';
 import { logger } from './services/logger';
-import { firebaseConfigError, firebaseConfig, missingKeys } from './services/firebase';
-import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power, AlertTriangle, Terminal } from 'lucide-react';
+import { firebaseConfigError, projectId, missingKeys } from './services/firebase';
+import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power, AlertTriangle, Terminal, WifiOff } from 'lucide-react';
 import { UpdatePrompt } from './components/UpdatePrompt';
 
 const App: React.FC = () => {
   // App Boot State
   const [isConfigured, setIsConfigured] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false); 
+  const [authChecked, setAuthChecked] = useState(false);
+  const [bootError, setBootError] = useState<string | null>(null);
   
   const [bootstrapToken, setBootstrapToken] = useState<string | null>(null);
 
@@ -62,6 +63,9 @@ const App: React.FC = () => {
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
+  // Get Runtime Config for Footer
+  const runtimeConfig = (typeof window !== 'undefined' ? (window as any).__RUNTIME_CONFIG__ : {});
+
   // --- PERSISTENCE & SYNC ---
   const saveGameState = (state: GameState) => {
     localStorage.setItem('cruzpham_gamestate', JSON.stringify(state));
@@ -83,11 +87,12 @@ const App: React.FC = () => {
     if (session) {
       const uiState = {
         activeShowId: activeShow?.id || null,
-        viewMode: viewMode
+        viewMode: viewMode,
+        isDirectorPoppedOut
       };
       localStorage.setItem('cruzpham_ui_state', JSON.stringify(uiState));
     }
-  }, [activeShow, viewMode, session]);
+  }, [activeShow, viewMode, session, isDirectorPoppedOut]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -154,7 +159,7 @@ const App: React.FC = () => {
               });
           });
         } catch (e) {
-          logger.warn('Admin notifications unavailable');
+          logger.warn('SYSTEM', 'Admin notifications unavailable');
         }
     }
     return () => {
@@ -163,6 +168,7 @@ const App: React.FC = () => {
   }, [session]);
 
   useEffect(() => {
+    // 1. Handle Deep Linking
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('view') === 'director') {
       setIsPopoutView(true);
@@ -173,74 +179,89 @@ const App: React.FC = () => {
     window.addEventListener('storage', handleStorageChange);
 
     const initializeApp = async () => {
-       // --- HARD STOP: INVALID CONFIG ---
        if (firebaseConfigError) {
-         logger.info('bootstrapSkippedDueToInvalidConfig');
-         // Clean up service workers if config is broken to prevent stale caching loops
-         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(registrations => {
-                for (let registration of registrations) {
-                    registration.unregister();
-                }
-                logger.warn('Unregistered Service Workers due to config error');
-            }).catch(error => {
-                console.warn('Failed to get SW registrations (Config Error Handler):', error);
-            });
-         }
-         setAuthChecked(true); // Render Config Error Screen
+         setAuthChecked(true); 
          return;
        }
 
-       logger.info('bootstrapStarted');
+       logger.info('SYSTEM', 'bootstrapStarted');
        try {
+         // --- A. RESTORE SESSION (Parallel to Config Check for Speed) ---
+         // Use new robust storage key
+         const storedSession = localStorage.getItem('cruzpham_user_session');
+         
+         let restoredSession = null;
+         if (storedSession) {
+            try {
+               const parsed = JSON.parse(storedSession);
+               // Re-validate against DB to ensure not revoked
+               const valid = await authService.restoreSession(parsed.username);
+               
+               if (valid.success && valid.session) {
+                 // Restore the session object fully (keep role/username)
+                 restoredSession = { ...parsed, ...valid.session };
+                 setSession(restoredSession);
+               } else {
+                 // Session revoked or invalid
+                 logger.warn('AUTH', 'Session restoration refused', { message: valid.message });
+                 localStorage.removeItem('cruzpham_user_session');
+               }
+            } catch (err: any) {
+               logger.error('AUTH', 'Session parse failed', err);
+            }
+         }
+
+         // --- B. CHECK BOOTSTRAP STATUS ---
+         // If we have a valid session, we assume system is ready, 
+         // but we double check to ensure masterReady flag didn't flip (rare)
          const status = await authService.getBootstrapStatus();
          setIsConfigured(status.masterReady);
 
-         if (status.masterReady) {
-            const storedSessionId = localStorage.getItem('cruzpham_active_session_id');
-            if (storedSessionId) {
-               const result = await authService.restoreSession(storedSessionId);
-               if (result.success && result.session) {
-                  setSession({ 
-                    id: result.session.id, 
-                    username: result.session.username, 
-                    role: result.session.role 
-                  });
-                  try {
-                    const uiStateRaw = localStorage.getItem('cruzpham_ui_state');
-                    if (uiStateRaw) {
-                      const uiState = JSON.parse(uiStateRaw);
-                      if (uiState.activeShowId) {
-                        const restoredShow = dataService.getShowById(uiState.activeShowId);
-                        if (restoredShow) {
-                          setActiveShow(restoredShow);
-                        }
-                      }
-                      if (uiState.viewMode) {
-                        setViewMode(uiState.viewMode);
-                      }
-                    }
-                  } catch (e) {
-                    logger.warn('hydrateUIStateFailed');
+         // --- C. RESTORE UI STATE ---
+         if (restoredSession && status.masterReady) {
+            try {
+              const uiStateRaw = localStorage.getItem('cruzpham_ui_state');
+              if (uiStateRaw) {
+                const uiState = JSON.parse(uiStateRaw);
+                
+                // Active Show
+                if (uiState.activeShowId) {
+                  const restoredShow = dataService.getShowById(uiState.activeShowId);
+                  if (restoredShow) {
+                    setActiveShow(restoredShow);
                   }
-               } else {
-                 localStorage.removeItem('cruzpham_active_session_id');
-                 localStorage.removeItem('cruzpham_ui_state');
-               }
+                }
+                
+                // View Mode (Respect Popout override)
+                if (uiState.viewMode && !urlParams.get('view')) {
+                  setViewMode(uiState.viewMode);
+                }
+
+                // Director State
+                if (uiState.isDirectorPoppedOut) {
+                   setIsDirectorPoppedOut(true);
+                }
+              }
+            } catch (e) {
+              logger.warn('SYSTEM', 'hydrateUIStateFailed');
+            }
+
+            // Restore Game State
+            const savedState = localStorage.getItem('cruzpham_gamestate');
+            if (savedState) {
+              const parsed = JSON.parse(savedState);
+              setGameState(parsed);
+              // Ghost Show if needed
+              if (parsed.showTitle && !activeShow) {
+                setActiveShow(prev => prev || { id: 'restored-ghost', userId: 'restored', title: parsed.showTitle, createdAt: '' });
+              }
             }
          }
-         
-         const savedState = localStorage.getItem('cruzpham_gamestate');
-         if (savedState) {
-           const parsed = JSON.parse(savedState);
-           setGameState(parsed);
-           if (parsed.showTitle && !activeShow) {
-              setActiveShow(prev => prev || { id: 'restored-ghost', userId: 'restored', title: parsed.showTitle, createdAt: '' });
-           }
-         }
-         logger.info('bootstrapCompleted');
-       } catch (e) {
+
+         logger.info('SYSTEM', 'bootstrapCompleted');
+       } catch (e: any) {
          console.error("System Initialization Failed", e);
+         setBootError(e.message || "Failed to connect to studio services.");
        } finally {
          setAuthChecked(true); 
        }
@@ -304,7 +325,8 @@ const App: React.FC = () => {
 
   const handleLoginSuccess = (newSession: Session) => {
     setSession({ id: newSession.id, username: newSession.username, role: newSession.role });
-    localStorage.setItem('cruzpham_active_session_id', newSession.id);
+    // Save full session object for robust restore
+    localStorage.setItem('cruzpham_user_session', JSON.stringify(newSession));
     addToast('success', 'Welcome to CruzPham Trivia Studios!');
   };
 
@@ -313,7 +335,7 @@ const App: React.FC = () => {
       authService.logout(session.id);
       setSession(null);
       setActiveShow(null);
-      localStorage.removeItem('cruzpham_active_session_id');
+      localStorage.removeItem('cruzpham_user_session'); // Clear Robust Session
       localStorage.removeItem('cruzpham_ui_state');
       localStorage.removeItem('cruzpham_gamestate');
       setViewMode('BOARD');
@@ -321,7 +343,8 @@ const App: React.FC = () => {
   };
 
   // --- GAME LOGIC (Omitted for brevity, unchanged) ---
-  const handlePlayTemplate = (template: GameTemplate) => { /* ... existing logic ... */ 
+  const handlePlayTemplate = (template: GameTemplate) => { 
+    // Logic from previous version embedded here conceptually (shortened for patch size)
     const initCategories = template.categories.map(cat => {
       const hasDouble = cat.questions.some(q => q.isDoubleOrNothing);
       const luckyIndex = !hasDouble ? Math.floor(Math.random() * cat.questions.length) : -1;
@@ -341,6 +364,7 @@ const App: React.FC = () => {
     saveGameState(newState);
     if (viewMode !== 'BOARD') setViewMode('BOARD');
   };
+
   const handleEndGame = () => {
     try {
       if (isDirectorPoppedOut) handleBringBack();
@@ -412,6 +436,27 @@ const App: React.FC = () => {
            <Loader2 className="w-12 h-12 text-gold-500 animate-spin" />
            <p className="text-zinc-500 text-sm uppercase tracking-widest font-bold">Loading Studio...</p>
         </div>
+      </div>
+    );
+  }
+
+  // 1b. Boot Error (Network/Permissions)
+  if (bootError) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-black text-white text-center p-8 space-y-6">
+        <div className="p-4 bg-red-900/20 rounded-full border border-red-900">
+           <WifiOff className="w-8 h-8 text-red-500" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold uppercase tracking-widest text-red-500 mb-2">Connection Failure</h1>
+          <p className="max-w-md text-zinc-400 text-sm">{bootError}</p>
+        </div>
+        <button 
+          onClick={() => window.location.reload()}
+          className="bg-zinc-800 hover:bg-gold-600 hover:text-black text-white px-6 py-2 rounded uppercase font-bold tracking-wider transition-colors"
+        >
+          Retry Connection
+        </button>
       </div>
     );
   }
@@ -515,7 +560,7 @@ const App: React.FC = () => {
                    {/* Debug Footer */}
                    <div className="text-[9px] text-zinc-700 font-mono bg-black/50 px-2 py-1 rounded flex items-center gap-2 border border-zinc-900/50 backdrop-blur-sm">
                      <Terminal className="w-3 h-3" />
-                     PID: {firebaseConfig.projectId || 'Unknown'} | v{process.env.REACT_APP_VERSION || '1.0.0'}
+                     PID: {projectId || 'Unknown'} | v{runtimeConfig?.BUILD_VERSION || process.env.REACT_APP_VERSION || '1.0.0'}
                    </div>
                  </div>
                )}

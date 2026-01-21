@@ -1,3 +1,4 @@
+
 import React, { ErrorInfo, ReactNode } from 'react';
 import { logger } from '../services/logger';
 
@@ -21,7 +22,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    logger.error('Uncaught error in component tree', { error, errorInfo });
+    logger.error('SYSTEM', 'Uncaught error in component tree', { error, errorInfo });
   }
 
   public handleReset = () => {

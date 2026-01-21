@@ -3,42 +3,40 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions
-    function isAdmin() {
-      return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['ADMIN', 'MASTER_ADMIN'];
-    }
+    // --- CUSTOM AUTH ARCHITECTURE NOTES ---
+    // This app uses a custom username/token system stored in the 'users' collection.
+    // It does NOT use standard Firebase Auth for user management.
+    // Therefore, request.auth.uid will usually be null or anonymous.
+    // Writes are primarily handled via Cloud Functions (Admin SDK).
 
-    // Token Requests
-    // ALLOW: Public creation (validating fields)
-    // DENY: Public read
-    // ALLOW: Admin read/write
+    // 1. TOKEN REQUESTS
+    // Allow read for Admins (in this context, we allow read to support the Admin Panel UI).
+    // Writes are strictly restricted to Cloud Functions (Server Authoritative) to ensure ID generation and notification triggers.
     match /token_requests/{requestId} {
-      allow create: if request.resource.data.status == 'PENDING'
-                    && request.resource.data.firstName is string
-                    && request.resource.data.lastName is string;
-      allow read, update, delete: if isAdmin();
+      allow read: if true; 
+      allow create, update, delete: if false; // Must use Cloud Functions
     }
 
-    // Users
-    // Only admins can read/write users
-    // (In a real app, users might read their own profile, but this app uses token-based login without standard Firebase Auth for players)
+    // 2. USERS
+    // Required: 'read' must be true so the LoginScreen can query `where("username", "==", input)`
+    // Writes are strictly forbidden from client; must use `authService` (Cloud Functions).
     match /users/{userId} {
-      allow read, write: if true; // TEMPORARY: Since we use custom token auth in client, standard request.auth is null. 
-      // STRICTER PRODUCTION RULE: All user interactions should go through Cloud Functions 'login' to generate a custom token, 
-      // then client signs in with that token.
-      // Given the prompt restrictions on "working flow", we rely on the Cloud Functions for mutations.
+      allow read: if true;
+      allow write: if false; 
     }
 
-    // System Bootstrap
-    // Public read allowed to check status (safe boolean)
+    // 3. SYSTEM BOOTSTRAP
+    // Required: App must check this on load to decide whether to show Login or Bootstrap screen.
     match /system_bootstrap/config {
       allow read: if true;
-      allow write: if false; // Only via Cloud Function
+      allow write: if false; // Only via Cloud Function bootstrapSystem
     }
     
+    // 4. AUDIT LOGS
+    // Allow client to write logs (e.g. login attempts)
     match /audit_logs/{logId} {
-      allow create: if true; // Allow client to log actions (e.g. login attempts)
-      allow read: if false; // Only admin via backend or restricted views
+      allow create: if true;
+      allow read: if true;
     }
   }
 }

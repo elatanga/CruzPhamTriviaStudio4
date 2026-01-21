@@ -3,40 +3,187 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const sgMail = require("@sendgrid/mail");
 const twilio = require("twilio");
+const crypto = require("crypto");
 
 admin.initializeApp();
 const db = admin.firestore();
 
-// --- CONFIG ---
-// Must set these via CLI: firebase functions:config:set sendgrid.key="SG..." twilio.sid="..." twilio.token="..."
-const SENDGRID_KEY = functions.config().sendgrid?.key;
-const TWILIO_SID = functions.config().twilio?.sid;
-const TWILIO_TOKEN = functions.config().twilio?.token;
-const TWILIO_FROM = functions.config().twilio?.from_number;
-const ADMIN_EMAILS = ["cruzphamnetwork@gmail.com", "eldecoder@gmail.com"];
+// --- CONFIGURATION ---
+const {
+  SENDGRID_API_KEY,
+  TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN,
+  TWILIO_FROM_NUMBER,
+  ADMIN_EMAILS: ENV_ADMIN_EMAILS,
+  ADMIN_PHONES: ENV_ADMIN_PHONES
+} = process.env;
 
-if (SENDGRID_KEY) sgMail.setApiKey(SENDGRID_KEY);
+const ADMIN_EMAILS = (ENV_ADMIN_EMAILS || "").split(",").map(e => e.trim()).filter(Boolean);
+const ADMIN_PHONES = (ENV_ADMIN_PHONES || "").split(",").map(p => p.trim()).filter(Boolean);
 
-// --- HELPERS ---
+if (SENDGRID_API_KEY) sgMail.setApiKey(SENDGRID_API_KEY);
+const twilioClient = (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
+
+// --- STRUCTURED LOGGING HELPERS ---
+
+const maskPII = (data) => {
+  if (typeof data === 'string') {
+    let text = data;
+    // Email
+    text = text.replace(/([a-zA-Z0-9._-]+)(@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi, (match, user, domain) => `${user.substring(0, 2)}***${domain}`);
+    // Phone
+    text = text.replace(/(\+?\d{1,3}[- ]?)?\(?\d{3}\)?[- ]?\d{3}[- ]?\d{4}/g, (match) => `${match.substring(0, 3)}****${match.substring(match.length - 2)}`);
+    // Tokens/Keys
+    text = text.replace(/([smakp]k-[a-zA-Z0-9]{3})[a-zA-Z0-9]+/g, '$1********');
+    text = text.replace(/(AIza[a-zA-Z0-9_-]{5})[a-zA-Z0-9_-]+/g, '$1********');
+    return text;
+  }
+  if (data instanceof Error) {
+    return { message: maskPII(data.message), stack: maskPII(data.stack) };
+  }
+  if (typeof data === 'object' && data !== null) {
+    if (Array.isArray(data)) return data.map(maskPII);
+    const masked = {};
+    for (const key in data) {
+      if (key.match(/token|password|secret|key/i)) masked[key] = '********';
+      else masked[key] = maskPII(data[key]);
+    }
+    return masked;
+  }
+  return data;
+};
+
+/**
+ * Logs a message to Cloud Logging in structured JSON format.
+ */
+const log = (severity, category, message, correlationId, data = {}) => {
+  const safeData = maskPII(data);
+  const entry = {
+    severity,
+    message: `[${category}] ${maskPII(message)}`,
+    category,
+    correlationId: correlationId || 'unknown',
+    component: 'cloud-functions',
+    timestamp: new Date().toISOString(),
+    ...safeData
+  };
+  console.log(JSON.stringify(entry));
+};
 
 const normalizePhone = (phone) => {
-  // Simple E.164 normalization logic (Production should use libphonenumber)
+  if (!phone) return "";
   let p = phone.replace(/[^+\d]/g, "");
-  if (!p.startsWith("+")) p = "+1" + p; // Default US if missing
+  if (!p.startsWith("+")) p = "+1" + p; 
   return p;
 };
 
-// --- FUNCTIONS ---
+const executeWithRetry = async (operation, context = "Operation", correlationId, maxRetries = 3) => {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      return await operation();
+    } catch (error) {
+      attempt++;
+      const isLastAttempt = attempt === maxRetries;
+      
+      log("WARNING", "NETWORK", `${context} failed (Attempt ${attempt}/${maxRetries})`, correlationId, { error });
 
-// 1. Check System Bootstrap Status (Publicly callable)
+      if (isLastAttempt) throw error;
+      const delay = 1000 * Math.pow(2, attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+};
+
+// --- NOTIFICATIONS ---
+
+const sendEmail = async (to, subject, text, correlationId) => {
+  if (!SENDGRID_API_KEY) {
+    log("WARNING", "CONFIG", "SendGrid API Key missing. Email skipped.", correlationId);
+    return { status: "SKIPPED" };
+  }
+
+  const msg = { to, from: "noreply@cruzpham.com", subject, text };
+  await executeWithRetry(() => sgMail.send(msg), "SendGrid Email", correlationId);
+  return { status: "SENT", provider: "sendgrid", timestamp: new Date().toISOString() };
+};
+
+const sendSms = async (to, body, correlationId) => {
+  if (!twilioClient) {
+    log("WARNING", "CONFIG", "Twilio credentials missing. SMS skipped.", correlationId);
+    return { status: "SKIPPED" };
+  }
+
+  await executeWithRetry(() => twilioClient.messages.create({
+    body, from: TWILIO_FROM_NUMBER, to
+  }), "Twilio SMS", correlationId);
+  return { status: "SENT", provider: "twilio", timestamp: new Date().toISOString() };
+};
+
+const handleNewRequestNotification = async (requestData, correlationId) => {
+  const updates = {};
+  
+  if (ADMIN_EMAILS.length > 0) {
+    try {
+      await sendEmail(
+        ADMIN_EMAILS,
+        `[CRUZPHAM] New Token Request: ${requestData.preferredUsername}`,
+        `New Request from ${requestData.firstName} ${requestData.lastName} (@${requestData.tiktokHandle}).\nPhone: ${requestData.phoneE164}\nID: ${requestData.id}\n\nPlease check Admin Console.`,
+        correlationId
+      );
+      updates["notify.emailStatus"] = "SENT";
+      updates["notify.emailProviderId"] = "sendgrid";
+    } catch (e) {
+      log("ERROR", "NETWORK", "Email Notification Failed", correlationId, { error: e });
+      updates["notify.emailStatus"] = "FAILED";
+      updates["notify.lastError"] = e.message;
+    }
+  } else {
+    updates["notify.emailStatus"] = "SKIPPED";
+  }
+
+  if (ADMIN_PHONES.length > 0) {
+    let anySuccess = false;
+    let errors = [];
+
+    const results = await Promise.allSettled(
+      ADMIN_PHONES.map(phone => 
+        sendSms(phone, `[CRUZPHAM] Request: ${requestData.preferredUsername} (${requestData.firstName})`, correlationId)
+      )
+    );
+
+    results.forEach(res => {
+      if (res.status === 'fulfilled' && res.value.status === 'SENT') anySuccess = true;
+      if (res.status === 'rejected') errors.push(res.reason.message);
+    });
+
+    if (anySuccess) {
+      updates["notify.smsStatus"] = "SENT";
+      updates["notify.smsProviderId"] = "twilio";
+    } else if (ADMIN_PHONES.length > 0 && !twilioClient) {
+       updates["notify.smsStatus"] = "SKIPPED";
+    } else {
+      updates["notify.smsStatus"] = "FAILED";
+      if (errors.length > 0) log("ERROR", "NETWORK", "All SMS Failed", correlationId, { errors });
+    }
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await db.collection("token_requests").doc(requestData.id).update(updates);
+  }
+};
+
+// --- EXPORTED CALLABLES ---
+
 exports.getSystemStatus = functions.https.onCall(async (data, context) => {
   const doc = await db.collection("system_bootstrap").doc("config").get();
   return { masterReady: doc.exists && doc.data().masterReady };
 });
 
-// 2. Submit Token Request (Publicly callable)
 exports.createTokenRequest = functions.https.onCall(async (data, context) => {
-  const { firstName, lastName, tiktokHandle, preferredUsername, phoneE164 } = data;
+  const { firstName, lastName, tiktokHandle, preferredUsername, phoneE164, correlationId } = data;
+  
+  log("INFO", "AUTH", `Received Token Request for ${preferredUsername}`, correlationId);
 
   if (!firstName || !lastName || !tiktokHandle || !preferredUsername || !phoneE164) {
     throw new functions.https.HttpsError("invalid-argument", "Missing fields");
@@ -63,64 +210,19 @@ exports.createTokenRequest = functions.https.onCall(async (data, context) => {
   };
 
   await db.collection("token_requests").doc(requestId).set(requestData);
-  
-  // Trigger notification attempt immediately (async)
-  // Note: We could use Firestore onCreate trigger, but calling internal logic is faster for feedback
-  await handleNewRequestNotification(requestData);
-
+  await handleNewRequestNotification(requestData, correlationId);
   return requestData;
 });
 
-// 3. INTERNAL: Handle Notifications
-const handleNewRequestNotification = async (requestData) => {
-  const updatePayload = {};
-  
-  // EMAIL
-  if (SENDGRID_KEY) {
-    try {
-      const msg = {
-        to: ADMIN_EMAILS,
-        from: "noreply@cruzpham.com", // Verify sender in SendGrid
-        subject: `[CRUZPHAM] New Token Request: ${requestData.preferredUsername}`,
-        text: `New Request from ${requestData.firstName} ${requestData.lastName} (@${requestData.tiktokHandle}).\nPhone: ${requestData.phoneE164}\nID: ${requestData.id}\n\nPlease check Admin Console.`
-      };
-      await sgMail.send(msg);
-      updatePayload["notify.emailStatus"] = "SENT";
-    } catch (e) {
-      console.error("Email Failed", e);
-      updatePayload["notify.emailStatus"] = "FAILED";
-      updatePayload["notify.lastError"] = e.message;
-    }
-  }
-
-  // SMS
-  if (TWILIO_SID && TWILIO_TOKEN) {
-    try {
-      const client = twilio(TWILIO_SID, TWILIO_TOKEN);
-      // Logic to find admin phone numbers would go here. For now, skipping implementation unless ADMIN_PHONES defined.
-      updatePayload["notify.smsStatus"] = "SENT"; // Simulated success for now
-    } catch (e) {
-      console.error("SMS Failed", e);
-      updatePayload["notify.smsStatus"] = "FAILED";
-    }
-  }
-
-  if (Object.keys(updatePayload).length > 0) {
-    await db.collection("token_requests").doc(requestData.id).update(updatePayload);
-  }
-};
-
-// 4. Retry Notification (Admin Only)
 exports.retryNotification = functions.https.onCall(async (data, context) => {
-  // Ensure Admin
-  // (In real prod, verify context.auth.uid against admin list in Firestore)
+  const { requestId, correlationId } = data;
+  log("INFO", "SYSTEM", `Retrying notification for ${requestId}`, correlationId);
   
-  const { requestId } = data;
   const doc = await db.collection("token_requests").doc(requestId).get();
   if (!doc.exists) throw new functions.https.HttpsError("not-found", "Request not found");
   
   const reqData = doc.data();
-  await handleNewRequestNotification(reqData);
+  await handleNewRequestNotification(reqData, correlationId);
   
   await db.collection("token_requests").doc(requestId).update({
     "notify.attempts": admin.firestore.FieldValue.increment(1)
@@ -129,48 +231,74 @@ exports.retryNotification = functions.https.onCall(async (data, context) => {
   return { success: true };
 });
 
-// 5. Send Manual Message (Admin Only)
 exports.sendManualNotification = functions.https.onCall(async (data, context) => {
-  const { targetUsername, method, content } = data;
-  // Look up user email/phone based on username
+  const { targetUsername, method, content, correlationId } = data;
+  log("INFO", "SYSTEM", `Manual Notification to ${targetUsername} via ${method}`, correlationId);
+  
   const userSnap = await db.collection("users").where("username", "==", targetUsername).limit(1).get();
   if (userSnap.empty) throw new functions.https.HttpsError("not-found", "User not found");
   
   const user = userSnap.docs[0].data();
   
-  if (method === "EMAIL" && user.email && SENDGRID_KEY) {
-     await sgMail.send({
-        to: user.email,
-        from: "noreply@cruzpham.com",
-        subject: "Message from CruzPham Studios",
-        text: content
-     });
+  try {
+    if (method === "EMAIL") {
+      if (!user.email) throw new functions.https.HttpsError("failed-precondition", "User has no email");
+      await sendEmail(user.email, "Message from CruzPham Studios", content, correlationId);
+    } else if (method === "SMS") {
+      if (!user.phone) throw new functions.https.HttpsError("failed-precondition", "User has no phone");
+      await sendSms(user.phone, content, correlationId);
+    }
+    return { success: true };
+  } catch (e) {
+    log("ERROR", "NETWORK", "Manual Send Failed", correlationId, { error: e });
+    throw new functions.https.HttpsError("internal", "Delivery failed: " + e.message);
   }
-  // SMS logic similar...
-  
-  return { success: true };
 });
 
-// 6. Bootstrap System (Secure atomic write)
 exports.bootstrapSystem = functions.https.onCall(async (data, context) => {
-  const doc = await db.collection("system_bootstrap").doc("config").get();
-  if (doc.exists && doc.data().masterReady) {
-    throw new functions.https.HttpsError("already-exists", "System already bootstrapped");
-  }
+  const { username, correlationId } = data;
+  log("INFO", "CONFIG", "Bootstrap Initiated", correlationId);
   
-  const token = 'mk-' + crypto.randomUUID().replace(/-/g, '');
-  // Hash logic ideally repeated here or passed in. 
-  // For simplicity in this structure, we return token to client to let client hash it if needed,
-  // OR ideally server hashes it.
-  // We will assume server handles simple storage for now.
-  
-  // NOTE: Production should implement the hashing here server-side.
-  
-  await db.collection("system_bootstrap").doc("config").set({
-    masterReady: true,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    masterUsername: data.username
+  return db.runTransaction(async (t) => {
+    const configRef = db.collection("system_bootstrap").doc("config");
+    const doc = await t.get(configRef);
+
+    if (doc.exists && doc.data().masterReady) {
+      log("WARNING", "CONFIG", "Bootstrap blocked: Already exists", correlationId);
+      throw new functions.https.HttpsError("already-exists", "System already bootstrapped");
+    }
+
+    const rawToken = 'mk-' + crypto.randomUUID().replace(/-/g, '');
+    const normalizeToken = (tok) => tok.trim().replace(/[\s-]/g, '');
+    const tokenHash = crypto.createHash('sha256').update(normalizeToken(rawToken)).digest('hex');
+
+    t.set(configRef, {
+      masterReady: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      masterUsername: username
+    });
+
+    const userId = crypto.randomUUID();
+    const userRef = db.collection("users").doc(userId);
+    
+    const newUser = {
+      id: userId,
+      username: username || 'admin',
+      tokenHash: tokenHash,
+      role: 'MASTER_ADMIN',
+      status: 'ACTIVE',
+      profile: {
+        source: 'BOOTSTRAP',
+        firstName: 'Master',
+        lastName: 'Admin'
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    t.set(userRef, newUser);
+    log("INFO", "CONFIG", "Bootstrap Complete", correlationId);
+
+    return { token: rawToken };
   });
-  
-  return { token };
 });

@@ -5,8 +5,47 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>CRUZPHAM TRIVIA STUDIOS</title>
-    <!-- Runtime config MUST load first -->
-    <script src="/runtime-config.js"></script>
+    
+    <!-- 1. Runtime Configuration Loader -->
+    <!-- Must load before React bundles to ensure env vars are available to the app -->
+    <script>
+      window.__RUNTIME_CONFIG__ = window.__RUNTIME_CONFIG__ || {};
+    </script>
+    
+    <!-- 2. Load Dynamic Config from Server -->
+    <!-- 'type="text/javascript"' ensures strict MIME checking passes -->
+    <script src="/runtime-config.js" type="text/javascript"></script>
+    
+    <script>
+      // 3. Fallback / Validation Logic
+      // If server returned null (missing env vars) or script failed to load (local dev), apply fallbacks.
+      if (!window.__RUNTIME_CONFIG__ || !window.__RUNTIME_CONFIG__.REACT_APP_FIREBASE_API_KEY) {
+        console.warn('CRUZPHAM: Runtime config missing or incomplete. Attempting build-time fallback.');
+        
+        // Ensure object exists
+        window.__RUNTIME_CONFIG__ = window.__RUNTIME_CONFIG__ || {};
+
+        // Hydrate from build-time replacements (e.g. for local npm start where process.env is baked in)
+        const fallbacks = {
+          REACT_APP_FIREBASE_API_KEY: "%REACT_APP_FIREBASE_API_KEY%",
+          REACT_APP_FIREBASE_AUTH_DOMAIN: "%REACT_APP_FIREBASE_AUTH_DOMAIN%",
+          REACT_APP_FIREBASE_PROJECT_ID: "%REACT_APP_FIREBASE_PROJECT_ID%",
+          REACT_APP_FIREBASE_STORAGE_BUCKET: "%REACT_APP_FIREBASE_STORAGE_BUCKET%",
+          REACT_APP_FIREBASE_MESSAGING_SENDER_ID: "%REACT_APP_FIREBASE_MESSAGING_SENDER_ID%",
+          REACT_APP_FIREBASE_APP_ID: "%REACT_APP_FIREBASE_APP_ID%",
+          API_KEY: "%API_KEY%",
+          BUILD_VERSION: "%REACT_APP_VERSION%",
+          BUILD_ENV: "development_fallback"
+        };
+
+        for (const [key, val] of Object.entries(fallbacks)) {
+          if (!window.__RUNTIME_CONFIG__[key] && val && !val.startsWith('%')) {
+             window.__RUNTIME_CONFIG__[key] = val;
+          }
+        }
+      }
+    </script>
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -34,15 +73,13 @@
         }
       }
     </script>
-    <!-- Fonts for Luxury Feel -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
     <style>
       body {
         background-color: #000000;
         color: #FFD700;
-        overflow: hidden; /* Enforce one screen */
+        overflow: hidden;
       }
-      /* Custom Scrollbar for internal content if strictly needed on tiny screens */
       ::-webkit-scrollbar {
         width: 6px;
       }
