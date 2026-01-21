@@ -6,11 +6,15 @@ export const UpdatePrompt: React.FC = () => {
   const [showUpdate, setShowUpdate] = useState(false);
 
   useEffect(() => {
-    // Listen for service worker updates
+    // Listen for service worker updates safely
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        setShowUpdate(true);
-      });
+      try {
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          setShowUpdate(true);
+        });
+      } catch (e) {
+        // Ignore if SW API is restricted
+      }
     }
   }, []);
 
@@ -21,6 +25,9 @@ export const UpdatePrompt: React.FC = () => {
           registration.unregister();
         }
         window.location.reload();
+      }).catch((error) => {
+        console.warn('Service Worker unregistration failed:', error);
+        window.location.reload(); // Ensure reload happens even if SW fails
       });
     } else {
       window.location.reload();

@@ -17,8 +17,8 @@ import { dataService } from './services/dataService';
 import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session } from './types';
 import { soundService } from './services/soundService';
 import { logger } from './services/logger';
-import { firebaseConfigError, firebaseConfig } from './services/firebase';
-import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power, AlertTriangle } from 'lucide-react';
+import { firebaseConfigError, firebaseConfig, missingKeys } from './services/firebase';
+import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power, AlertTriangle, Terminal } from 'lucide-react';
 import { UpdatePrompt } from './components/UpdatePrompt';
 
 const App: React.FC = () => {
@@ -173,11 +173,25 @@ const App: React.FC = () => {
     window.addEventListener('storage', handleStorageChange);
 
     const initializeApp = async () => {
+       // --- HARD STOP: INVALID CONFIG ---
        if (firebaseConfigError) {
-         setAuthChecked(true); // Allow render to show error screen
+         logger.info('bootstrapSkippedDueToInvalidConfig');
+         // Clean up service workers if config is broken to prevent stale caching loops
+         if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(registrations => {
+                for (let registration of registrations) {
+                    registration.unregister();
+                }
+                logger.warn('Unregistered Service Workers due to config error');
+            }).catch(error => {
+                console.warn('Failed to get SW registrations (Config Error Handler):', error);
+            });
+         }
+         setAuthChecked(true); // Render Config Error Screen
          return;
        }
 
+       logger.info('bootstrapStarted');
        try {
          const status = await authService.getBootstrapStatus();
          setIsConfigured(status.masterReady);
@@ -224,6 +238,7 @@ const App: React.FC = () => {
               setActiveShow(prev => prev || { id: 'restored-ghost', userId: 'restored', title: parsed.showTitle, createdAt: '' });
            }
          }
+         logger.info('bootstrapCompleted');
        } catch (e) {
          console.error("System Initialization Failed", e);
        } finally {
@@ -373,14 +388,18 @@ const App: React.FC = () => {
         <h1 className="text-2xl font-bold uppercase tracking-widest">Configuration Error</h1>
         <p className="max-w-md text-zinc-400 text-sm">
           The studio environment is missing required secure keys.
-          <br/>Please check your environment variables.
+          <br/>Please contact the administrator or check deployment environment variables.
         </p>
-        <div className="text-xs text-zinc-600 border border-zinc-800 p-4 rounded bg-zinc-900/50 w-full max-w-lg text-left">
-          MISSING KEYS:<br/>
-          {(!process.env.REACT_APP_FIREBASE_API_KEY) && '- REACT_APP_FIREBASE_API_KEY\n'}
-          {(!process.env.REACT_APP_FIREBASE_AUTH_DOMAIN) && '- REACT_APP_FIREBASE_AUTH_DOMAIN\n'}
-          {(!process.env.REACT_APP_FIREBASE_PROJECT_ID) && '- REACT_APP_FIREBASE_PROJECT_ID\n'}
-        </div>
+        {missingKeys.length > 0 && (
+          <div className="text-xs text-zinc-600 border border-zinc-800 p-4 rounded bg-zinc-900/50 w-full max-w-lg text-left">
+            <strong className="block mb-2 text-zinc-500">MISSING VARIABLES:</strong>
+            <ul className="list-disc pl-4 space-y-1">
+              {missingKeys.map(key => (
+                <li key={key}>REACT_APP_FIREBASE_{key.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase()}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     );
   }
@@ -477,22 +496,30 @@ const App: React.FC = () => {
           {!activeShow ? (
             <>
                <ShowSelection username={session.username} onSelectShow={setActiveShow} />
-               {isAdmin && (
-                 <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2">
-                   <button onClick={() => setViewMode('ADMIN')} className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-500 hover:text-gold-500 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-full transition-all relative group">
-                     <Shield className="w-3 h-3" /> Admin Console
-                     {pendingRequests > 0 && (
-                       <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-bounce shadow-lg shadow-red-500/50">
-                         {pendingRequests}
-                       </span>
+               
+               {/* Admin/Dev Status Footer (Only Visible if Admin or Dev) */}
+               {(isAdmin || process.env.NODE_ENV === 'development') && (
+                 <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2 pointer-events-none">
+                   <div className="pointer-events-auto">
+                     {isAdmin && (
+                        <button onClick={() => setViewMode('ADMIN')} className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-500 hover:text-gold-500 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-full transition-all relative group">
+                          <Shield className="w-3 h-3" /> Admin Console
+                          {pendingRequests > 0 && (
+                            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-bounce shadow-lg shadow-red-500/50">
+                              {pendingRequests}
+                            </span>
+                          )}
+                        </button>
                      )}
-                   </button>
+                   </div>
                    {/* Debug Footer */}
-                   <div className="text-[9px] text-zinc-700 font-mono">
-                     PID: {firebaseConfig.projectId} | v1.0.2
+                   <div className="text-[9px] text-zinc-700 font-mono bg-black/50 px-2 py-1 rounded flex items-center gap-2 border border-zinc-900/50 backdrop-blur-sm">
+                     <Terminal className="w-3 h-3" />
+                     PID: {firebaseConfig.projectId || 'Unknown'} | v{process.env.REACT_APP_VERSION || '1.0.0'}
                    </div>
                  </div>
                )}
+
                {viewMode === 'ADMIN' && (
                  <div className="fixed inset-0 z-50 animate-in fade-in slide-in-from-bottom duration-300">
                     <AdminPanel currentUser={session.username} onClose={() => setViewMode('BOARD')} addToast={addToast} />

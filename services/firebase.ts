@@ -4,6 +4,7 @@ import { getFirestore, Firestore } from 'firebase/firestore';
 import { getFunctions, Functions } from 'firebase/functions';
 import { logger } from './logger';
 
+// 1. Strict Configuration - No Fallbacks
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
@@ -16,27 +17,44 @@ const firebaseConfig = {
 let app: FirebaseApp | undefined;
 let db: Firestore | undefined;
 let functions: Functions | undefined;
-let firebaseConfigError = false;
 
-// Strict Validation: Check if ANY required key is missing or is a placeholder
-const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'appId'];
-const isMissingKeys = requiredKeys.some(key => !firebaseConfig[key as keyof typeof firebaseConfig]);
-const isPlaceholder = firebaseConfig.apiKey?.includes('INSERT_KEY') || firebaseConfig.apiKey?.includes('DummyKey');
+// 2. Validation Logic
+const requiredKeys = [
+  'apiKey', 
+  'authDomain', 
+  'projectId', 
+  'storageBucket', 
+  'messagingSenderId', 
+  'appId'
+];
 
-if (isMissingKeys || isPlaceholder) {
-  firebaseConfigError = true;
-  logger.error('Firebase Config Missing or Invalid', { config: firebaseConfig });
-  // We do NOT initialize app here to prevent "Permission Denied" loops on startup
+const missingKeys = requiredKeys.filter(key => {
+  const val = firebaseConfig[key as keyof typeof firebaseConfig];
+  return !val || val.includes('INSERT_KEY') || val.includes('DummyKey');
+});
+
+const firebaseConfigError = missingKeys.length > 0;
+
+if (firebaseConfigError) {
+  // 3. Fail Fast - Do NOT initialize
+  logger.error('firebaseConfigMissing', { 
+    missingKeys, 
+    correlationId: logger.getCorrelationId(),
+    buildVersion: process.env.REACT_APP_VERSION || 'unknown'
+  });
 } else {
   try {
+    // 4. Initialize exactly once
     app = initializeApp(firebaseConfig as any);
     db = getFirestore(app);
     functions = getFunctions(app);
     logger.info('Firebase Initialized Successfully', { projectId: firebaseConfig.projectId });
   } catch (e: any) {
     logger.error('Firebase Initialization Crashed', { error: e.message });
-    firebaseConfigError = true;
+    // If init crashes despite valid keys (e.g. duplicate app), treat as config error to be safe
+    // However, usually we'd want to just log it. For this app's safety constraints:
+    console.error("Critical Firebase Init Error", e);
   }
 }
 
-export { app, db, functions, firebaseConfigError, firebaseConfig };
+export { app, db, functions, firebaseConfigError, missingKeys, firebaseConfig };

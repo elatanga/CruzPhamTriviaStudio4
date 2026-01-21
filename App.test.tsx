@@ -1,8 +1,9 @@
 
 import React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import { authService } from './services/authService';
+import * as firebaseModule from './services/firebase';
 
 declare const jest: any;
 declare const describe: any;
@@ -16,11 +17,13 @@ jest.mock('./services/logger', () => ({
   logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), getCorrelationId: () => 'test-id', maskPII: (v:any) => v }
 }));
 
+// Mock Firebase Module explicitly to control config error state
 jest.mock('./services/firebase', () => ({
   db: {},
   functions: {},
   firebaseConfigError: false,
-  firebaseConfig: { projectId: 'test-project' }
+  firebaseConfig: { projectId: 'test-project' },
+  missingKeys: []
 }));
 
 jest.mock('./services/soundService', () => ({
@@ -42,14 +45,35 @@ jest.mock('./services/geminiService', () => ({
 describe('CRUZPHAM STUDIOS Core Logic', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    
     // Default Mock Implementations
     jest.spyOn(authService, 'getBootstrapStatus').mockResolvedValue({ masterReady: false });
     jest.spyOn(authService, 'restoreSession').mockResolvedValue({ success: false });
     jest.spyOn(authService, 'subscribeToRequests').mockReturnValue(() => {});
   });
 
-  // --- 1. BOOTSTRAP LOCK TESTS ---
+  // --- 1. CONFIGURATION ERROR TESTS ---
+  
+  describe('FIREBASE CONFIGURATION', () => {
+    test('Shows Config Error Screen if firebaseConfigError is true', async () => {
+      // Temporarily override the mock for this test
+      (firebaseModule as any).firebaseConfigError = true;
+      (firebaseModule as any).missingKeys = ['apiKey', 'authDomain'];
+
+      render(<App />);
+      
+      await waitFor(() => {
+        expect(screen.getByText(/Configuration Error/i)).toBeInTheDocument();
+        expect(screen.getByText(/REACT_APP_FIREBASE_API_KEY/i)).toBeInTheDocument();
+        expect(screen.getByText(/REACT_APP_FIREBASE_AUTH_DOMAIN/i)).toBeInTheDocument();
+      });
+
+      // Restore for other tests
+      (firebaseModule as any).firebaseConfigError = false;
+      (firebaseModule as any).missingKeys = [];
+    });
+  });
+
+  // --- 2. BOOTSTRAP LOCK TESTS ---
   
   describe('BOOTSTRAP LOCK (UNIT)', () => {
     test('UI renders Bootstrap Screen when masterReady == false', async () => {
@@ -73,7 +97,7 @@ describe('CRUZPHAM STUDIOS Core Logic', () => {
     });
   });
 
-  // --- 2. SESSION PERSISTENCE TESTS ---
+  // --- 3. SESSION PERSISTENCE TESTS ---
 
   describe('SESSION PERSISTENCE (UNIT)', () => {
     test('Restoring valid session hydrates user state', async () => {
