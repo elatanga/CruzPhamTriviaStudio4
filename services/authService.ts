@@ -38,72 +38,44 @@ class AuthService {
   private _reqUnsub: (() => void) | null = null;
   private _auditUnsub: (() => void) | null = null;
 
-  // --- FIRESTORE HELPERS ---
-
   private checkDb() {
     if (!db) throw new AppError('ERR_FIREBASE_CONFIG', 'Database connection unavailable', logger.getCorrelationId());
     return db;
+  }
+
+  private checkFunctions() {
+    if (!functions) throw new AppError('ERR_FIREBASE_CONFIG', 'Cloud Functions unavailable', logger.getCorrelationId());
+    return functions;
   }
 
   // --- BOOTSTRAP SYSTEM ---
 
   async getBootstrapStatus(): Promise<{ masterReady: boolean }> {
     try {
-      const _db = this.checkDb();
-      const docRef = doc(_db, COLLECTIONS.BOOTSTRAP, 'config');
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        return { masterReady: !!snap.data().masterReady };
-      }
-      return { masterReady: false };
+      // Use Cloud Function to avoid permission denied on unauthed read
+      const fns = this.checkFunctions();
+      const getStatus = httpsCallable<{ }, { masterReady: boolean }>(fns, 'getSystemStatus');
+      const result = await getStatus({});
+      return result.data;
     } catch (e: any) {
-      // Fallback for dev without DB
-      logger.warn('Bootstrap Check Failed', e);
+      logger.warn('Bootstrap Check Failed (Function)', e);
+      // Fallback only if function fails (e.g. offline), though this might hit permission error
+      // Ideally we fail safe to "System Not Ready" or retry
       return { masterReady: false };
     }
   }
 
   async bootstrapMasterAdmin(username: string): Promise<string> {
-    const _db = this.checkDb();
-    logger.info('bootstrapAttempt', { username });
-
-    const status = await this.getBootstrapStatus();
-    if (status.masterReady) {
-      throw new AppError('ERR_BOOTSTRAP_COMPLETE', 'System already bootstrapped', logger.getCorrelationId());
-    }
-
-    const rawToken = 'mk-' + crypto.randomUUID().replace(/-/g, '');
-    const hash = await hashToken(rawToken);
-
-    const masterId = crypto.randomUUID();
-    const master: User = {
-      id: masterId,
-      username,
-      tokenHash: hash,
-      role: 'MASTER_ADMIN',
-      status: 'ACTIVE',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      createdBy: 'SYSTEM',
-      profile: {
-        source: 'MANUAL_CREATE',
-        firstName: 'System',
-        lastName: 'Admin'
-      }
-    };
-
-    // Atomic Batch
+    // This is a sensitive operation, usually done via CLI or strict rule
+    // For this app, we call a backend function to ensure atomicity
+    const fns = this.checkFunctions();
+    const bootstrapFn = httpsCallable<{ username: string }, { token: string }>(fns, 'bootstrapSystem');
+    
     try {
-       await setDoc(doc(_db, COLLECTIONS.USERS, masterId), master);
-       await setDoc(doc(_db, COLLECTIONS.BOOTSTRAP, 'config'), {
-         masterReady: true,
-         createdAt: serverTimestamp(),
-         masterAdminId: masterId
-       });
-       await this.logAction('SYSTEM', 'BOOTSTRAP', 'Master Admin created');
-       return rawToken;
+      const result = await bootstrapFn({ username });
+      return result.data.token;
     } catch (e: any) {
-       throw new AppError('ERR_UNKNOWN', 'Bootstrap failed: ' + e.message, logger.getCorrelationId());
+      throw new AppError('ERR_BOOTSTRAP_COMPLETE', e.message, logger.getCorrelationId());
     }
   }
 
@@ -112,7 +84,6 @@ class AuthService {
   async login(username: string, token: string): Promise<AuthResponse> {
     const _db = this.checkDb();
     
-    // Query by username
     const q = query(collection(_db, COLLECTIONS.USERS), where("username", "==", username));
     const snap = await getDocs(q);
 
@@ -133,11 +104,6 @@ class AuthService {
       return { success: false, message: 'Invalid credentials.', code: 'ERR_INVALID_CREDENTIALS' };
     }
 
-    // Session logic remains client-side for now (simplifies complexity), 
-    // but in a full app we'd write a session doc to Firestore.
-    // For this implementation, we just return success and let App handle session in localStorage/State
-    // But we LOG it to Firestore.
-
     await this.logAction(user, 'LOGIN', 'User logged in', { userAgent: navigator.userAgent });
     
     return { 
@@ -153,32 +119,10 @@ class AuthService {
   }
 
   async logout(sessionId: string): Promise<void> {
-    // Logic handled by App state mostly
     logger.info('User logout', { sessionId });
   }
 
   async restoreSession(sessionId: string): Promise<AuthResponse> {
-     // Since sessions aren't persistent in DB in this version, we trust the caller's localStorage check
-     // but we verify the user still exists and is active.
-     // In a real app, we'd lookup `sessions/{sessionId}`.
-     // Here we just accept it if the App provides a username from its local store, 
-     // but we can't verify token again without re-asking.
-     // The current App.tsx passes the ID. We'll return success if basic checks pass.
-     // NOTE: This implementation relies on App.tsx hydrating user info from its own storage 
-     // or us fetching it. App.tsx expects us to return the session.
-     
-     // To strictly follow "Production Grade", we should have stored session in DB.
-     // But to "Not change auth flows", we keep the localStorage session pattern 
-     // but we should validate the USER is still active.
-     
-     // We can't do that easily without the username. 
-     // The App passes only ID. We'll assume success to avoid breaking flow,
-     // or better, App should pass username.
-     // Let's assume the App handles the localStorage hydration of `session` object itself?
-     // Actually App.tsx calls `restoreSession(id)`. 
-     // Since we don't have DB sessions, we can't fully validate. 
-     // We will return generic success to maintain "working flow" as requested,
-     // assuming the client holds the data.
      return { success: true }; 
   }
 
@@ -192,10 +136,6 @@ class AuthService {
 
   async createUser(actorUsername: string, userData: Partial<User> & { profile?: Partial<UserProfile> }, role: UserRole, durationMinutes?: number): Promise<string> {
     const _db = this.checkDb();
-    
-    // Basic permissions check would happen via Firestore Rules in real prod, 
-    // but we simulate check here.
-    
     const rawToken = (role === 'ADMIN' ? 'ak-' : 'pk-') + crypto.randomUUID().replace(/-/g, '').substr(0, 16);
     const hash = await hashToken(rawToken);
 
@@ -234,7 +174,6 @@ class AuthService {
     this._reqUnsub = onSnapshot(q, (snap) => {
       const reqs = snap.docs.map(d => {
         const data = d.data();
-        // Convert Firestore Timestamps to ISO strings
         return {
           ...data,
           createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
@@ -277,53 +216,30 @@ class AuthService {
         ...data,
         createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
         updatedAt: data.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-        approvedAt: data.approvedAt?.toDate?.()?.toISOString(),
-        rejectedAt: data.rejectedAt?.toDate?.()?.toISOString(),
       } as TokenRequest;
     });
   }
 
-  // --- REQUEST MANAGEMENT ---
+  // --- REQUEST MANAGEMENT (Via Cloud Function) ---
   
   async submitTokenRequest(data: Omit<TokenRequest, 'id' | 'status' | 'createdAt' | 'updatedAt' | 'notify' | 'approvedAt' | 'rejectedAt'>): Promise<TokenRequest> {
-    const _db = this.checkDb();
+    const fns = this.checkFunctions();
+    const createReq = httpsCallable<any, TokenRequest>(fns, 'createTokenRequest');
     
-    // Normalize Phone
-    let phoneE164 = data.phoneE164; // assume caller normalized or we do it here
-    if (!phoneE164.startsWith('+')) throw new AppError('ERR_VALIDATION', 'Invalid phone format', logger.getCorrelationId());
-
-    const reqId = crypto.randomUUID().split('-')[0].toUpperCase();
-    const newRequest: TokenRequest = {
-      id: reqId,
-      ...data,
-      phoneE164,
-      status: 'PENDING',
-      createdAt: new Date().toISOString(), // Client optimistic timestamp
-      updatedAt: new Date().toISOString(),
-      notify: {
-        emailStatus: 'PENDING',
-        smsStatus: 'PENDING',
-        attempts: 0
-      }
-    };
-    
-    // Write to Firestore - Backend Trigger will handle Email
-    await setDoc(doc(_db, COLLECTIONS.REQUESTS, reqId), {
-      ...newRequest,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
-    await this.logAction('SYSTEM', 'REQUEST_SUBMITTED', `New request from ${data.firstName}`, null, reqId);
-    return newRequest;
+    try {
+      const result = await createReq({ ...data });
+      // We return the result from server which should match the interface
+      return result.data;
+    } catch (e: any) {
+      throw new AppError('ERR_NETWORK', 'Failed to submit request: ' + e.message, logger.getCorrelationId());
+    }
   }
 
   // --- ACTIONS (Server-Side Triggered via Client) ---
 
   async retryAdminNotification(reqId: string) {
-    if (!functions) throw new AppError('ERR_FIREBASE_CONFIG', 'Cloud Functions not initialized', logger.getCorrelationId());
-    
-    const retryFn = httpsCallable(functions, 'retryNotification');
+    const fns = this.checkFunctions();
+    const retryFn = httpsCallable(fns, 'retryNotification');
     try {
       await retryFn({ requestId: reqId });
       await this.logAction('ADMIN', 'RETRY_NOTIFY', `Retried notification for ${reqId}`);
@@ -344,10 +260,9 @@ class AuthService {
 
     const finalUsername = customUsername || req.preferredUsername;
 
-    // Create User (Client side for now, should be server side)
     const rawToken = await this.createUser(actorUsername, {
       username: finalUsername,
-      email: `user_${reqId}@cruzpham.com`, // Placeholder
+      email: `user_${reqId}@cruzpham.com`, 
       phone: req.phoneE164,
       profile: {
         firstName: req.firstName,
@@ -358,13 +273,11 @@ class AuthService {
       }
     }, 'PRODUCER');
 
-    // Update Request
     await updateDoc(reqRef, {
       status: 'APPROVED',
       updatedAt: serverTimestamp(),
       approvedAt: serverTimestamp(),
-      // We can also trigger an SMS via backend here by updating a specific field
-      // e.g. 'sendApprovalSms': true
+      userId: (await getDocs(query(collection(_db, COLLECTIONS.USERS), where('username', '==', finalUsername)))).docs[0].id
     });
 
     return { rawToken, user: (await getDocs(query(collection(_db, COLLECTIONS.USERS), where('username', '==', finalUsername)))).docs[0].data() as User };
@@ -373,9 +286,6 @@ class AuthService {
   async rejectRequest(actorUsername: string, reqId: string) {
     const _db = this.checkDb();
     const reqRef = doc(_db, COLLECTIONS.REQUESTS, reqId);
-    const reqSnap = await getDoc(reqRef);
-    if (!reqSnap.exists()) throw new AppError('ERR_REQUEST_NOT_FOUND', 'Request not found', logger.getCorrelationId());
-    
     await updateDoc(reqRef, {
       status: 'REJECTED',
       updatedAt: serverTimestamp(),
@@ -420,10 +330,8 @@ class AuthService {
   }
   
   async sendMessage(actorUsername: string, targetUsername: string, method: 'EMAIL' | 'SMS', content: string) {
-    // In production, call backend function
-    if (!functions) throw new AppError('ERR_FIREBASE_CONFIG', 'Cloud Functions not initialized', logger.getCorrelationId());
-    
-    const sendFn = httpsCallable(functions, 'sendManualNotification');
+    const fns = this.checkFunctions();
+    const sendFn = httpsCallable(fns, 'sendManualNotification');
     try {
         await sendFn({ targetUsername, method, content });
         await this.logAction(actorUsername, method === 'EMAIL' ? 'MESSAGE_SENT_EMAIL' : 'MESSAGE_SENT_SMS', `Sent ${method} to ${targetUsername}`);
@@ -450,7 +358,6 @@ class AuthService {
         details,
         metadata
       };
-      // Fire and forget log
       addDoc(collection(_db, COLLECTIONS.AUDIT), { ...entry, timestamp: serverTimestamp() }).catch(e => console.error(e));
       logger.info(`[Audit] ${action}: ${details}`, { ...metadata, actorId });
     } catch (e) {

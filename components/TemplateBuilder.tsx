@@ -416,7 +416,12 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                
                <div className="space-y-4">
                  <div>
-                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">Question <HelpCircle className="w-3 h-3 cursor-help" title="The text displayed to the host/players" /></label>
+                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">
+                     Question 
+                     <span title="The text displayed to the host/players">
+                       <HelpCircle className="w-3 h-3 cursor-help" />
+                     </span>
+                   </label>
                    <textarea 
                      id="edit-q-text"
                      defaultValue={q.text}
@@ -424,7 +429,12 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                    />
                  </div>
                  <div>
-                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">Answer <HelpCircle className="w-3 h-3 cursor-help" title="Hidden until revealed by host" /></label>
+                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">
+                     Answer 
+                     <span title="Hidden until revealed by host">
+                       <HelpCircle className="w-3 h-3 cursor-help" />
+                     </span>
+                   </label>
                    <textarea 
                      id="edit-q-answer"
                      defaultValue={q.answer}
