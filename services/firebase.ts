@@ -15,7 +15,7 @@ interface RuntimeConfig {
   FIREBASE_APP_ID?: string;
   API_KEY?: string; // Gemini
   BUILD_VERSION?: string;
-  [key: string]: string | undefined;
+  [key: string]: any;
 }
 
 // 2. Safe Config Accessor
@@ -28,7 +28,8 @@ const getRuntimeConfig = (): RuntimeConfig => {
 
 const runtimeConfig = getRuntimeConfig();
 
-// 3. Strict Validation Logic (using clean keys)
+// 3. Strict Validation Logic
+// We explicitly check for the FIREBASE_ prefixed keys provided by server.js
 const requiredKeys = [
   'FIREBASE_API_KEY',
   'FIREBASE_AUTH_DOMAIN',
@@ -40,10 +41,13 @@ const requiredKeys = [
 
 // Helper: Detect invalid/placeholder values
 const isInvalid = (val: string | undefined): boolean => {
-  if (!val) return true;
-  if (val.startsWith('%') && val.endsWith('%')) return true; // Build-time placeholder left over
-  if (val.startsWith('__') && val.endsWith('__')) return true; // Runtime placeholder left over
-  if (val.includes('INSERT_KEY')) return true; // Default template text
+  if (!val || typeof val !== 'string') return true;
+  const trimmed = val.trim();
+  if (trimmed === '') return true;
+  if (trimmed.startsWith('%') && trimmed.endsWith('%')) return true; // Build-time placeholder
+  if (trimmed.startsWith('__') && trimmed.endsWith('__')) return true; // Runtime placeholder
+  if (trimmed.includes('INSERT_KEY')) return true; // Default template text
+  if (trimmed === 'undefined' || trimmed === 'null') return true;
   return false;
 };
 
@@ -59,10 +63,11 @@ let projectId: string | undefined;
 
 // 4. Initialization Logic
 if (firebaseConfigError) {
+  // Log strictly what is missing so it can be debugged in console
   logger.error('CONFIG', 'Firebase Configuration Missing or Invalid', {
     missingKeys,
-    correlationId: logger.getCorrelationId(),
-    environment: process.env.NODE_ENV
+    configState: 'partial_or_empty',
+    correlationId: logger.getCorrelationId()
   });
 } else {
   try {
@@ -77,30 +82,26 @@ if (firebaseConfigError) {
 
     projectId = config.projectId;
 
-    // Ensure singleton instance
+    // Singleton Pattern: Check if app already exists (e.g. fast refresh)
     if (!getApps().length) {
       app = initializeApp(config);
+      logger.info('SYSTEM', 'Firebase App Initialized', { projectId });
     } else {
       app = getApps()[0];
+      logger.info('SYSTEM', 'Firebase App Re-used', { projectId });
     }
 
+    // Initialize Services
     db = getFirestore(app);
     functions = getFunctions(app);
     auth = getAuth(app);
 
-    // Auto-authenticate anonymously to establish a valid Firebase Context
-    // This helps resolve "Permission Denied" errors that occur when no User object exists
+    // Auto-authenticate anonymously to establish a valid Firebase Context immediately.
+    // This prevents "Permission Denied" errors on public reads if rules require 'auth != null'.
     signInAnonymously(auth).catch((err) => {
       logger.warn('AUTH', 'Anonymous Auth Failed', { error: err.message });
     });
     
-    logger.info('SYSTEM', 'Firebase Initialized Successfully', { 
-      projectId, 
-      authDomain: config.authDomain,
-      version: runtimeConfig.BUILD_VERSION,
-      correlationId: logger.getCorrelationId()
-    });
-
   } catch (error: any) {
     logger.error('SYSTEM', 'Firebase Critical Failure During Init', {
       message: error.message,
