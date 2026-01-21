@@ -19,20 +19,21 @@
     <script>
       // 3. Fallback / Validation Logic
       // If server returned null (missing env vars) or script failed to load (local dev), apply fallbacks.
-      if (!window.__RUNTIME_CONFIG__ || !window.__RUNTIME_CONFIG__.REACT_APP_FIREBASE_API_KEY) {
+      if (!window.__RUNTIME_CONFIG__ || !window.__RUNTIME_CONFIG__.FIREBASE_API_KEY) {
         console.warn('CRUZPHAM: Runtime config missing or incomplete. Attempting build-time fallback.');
         
         // Ensure object exists
         window.__RUNTIME_CONFIG__ = window.__RUNTIME_CONFIG__ || {};
 
         // Hydrate from build-time replacements (e.g. for local npm start where process.env is baked in)
+        // We map the standard REACT_APP_ placeholders to our new clean FIREBASE_ keys
         const fallbacks = {
-          REACT_APP_FIREBASE_API_KEY: "%REACT_APP_FIREBASE_API_KEY%",
-          REACT_APP_FIREBASE_AUTH_DOMAIN: "%REACT_APP_FIREBASE_AUTH_DOMAIN%",
-          REACT_APP_FIREBASE_PROJECT_ID: "%REACT_APP_FIREBASE_PROJECT_ID%",
-          REACT_APP_FIREBASE_STORAGE_BUCKET: "%REACT_APP_FIREBASE_STORAGE_BUCKET%",
-          REACT_APP_FIREBASE_MESSAGING_SENDER_ID: "%REACT_APP_FIREBASE_MESSAGING_SENDER_ID%",
-          REACT_APP_FIREBASE_APP_ID: "%REACT_APP_FIREBASE_APP_ID%",
+          FIREBASE_API_KEY: "%REACT_APP_FIREBASE_API_KEY%",
+          FIREBASE_AUTH_DOMAIN: "%REACT_APP_FIREBASE_AUTH_DOMAIN%",
+          FIREBASE_PROJECT_ID: "%REACT_APP_FIREBASE_PROJECT_ID%",
+          FIREBASE_STORAGE_BUCKET: "%REACT_APP_FIREBASE_STORAGE_BUCKET%",
+          FIREBASE_MESSAGING_SENDER_ID: "%REACT_APP_FIREBASE_MESSAGING_SENDER_ID%",
+          FIREBASE_APP_ID: "%REACT_APP_FIREBASE_APP_ID%",
           API_KEY: "%API_KEY%",
           BUILD_VERSION: "%REACT_APP_VERSION%",
           BUILD_ENV: "development_fallback"

@@ -419,7 +419,7 @@ const App: React.FC = () => {
             <strong className="block mb-2 text-zinc-500">MISSING VARIABLES:</strong>
             <ul className="list-disc pl-4 space-y-1">
               {missingKeys.map(key => (
-                <li key={key}>REACT_APP_FIREBASE_{key.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase()}</li>
+                <li key={key} className="text-red-400 font-bold">{key}</li>
               ))}
             </ul>
           </div>

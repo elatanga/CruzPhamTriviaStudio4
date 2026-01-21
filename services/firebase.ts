@@ -7,12 +7,12 @@ import { logger } from './logger';
 
 // 1. Valid Configuration Interface
 interface RuntimeConfig {
-  REACT_APP_FIREBASE_API_KEY?: string;
-  REACT_APP_FIREBASE_AUTH_DOMAIN?: string;
-  REACT_APP_FIREBASE_PROJECT_ID?: string;
-  REACT_APP_FIREBASE_STORAGE_BUCKET?: string;
-  REACT_APP_FIREBASE_MESSAGING_SENDER_ID?: string;
-  REACT_APP_FIREBASE_APP_ID?: string;
+  FIREBASE_API_KEY?: string;
+  FIREBASE_AUTH_DOMAIN?: string;
+  FIREBASE_PROJECT_ID?: string;
+  FIREBASE_STORAGE_BUCKET?: string;
+  FIREBASE_MESSAGING_SENDER_ID?: string;
+  FIREBASE_APP_ID?: string;
   API_KEY?: string; // Gemini
   BUILD_VERSION?: string;
   [key: string]: string | undefined;
@@ -28,14 +28,14 @@ const getRuntimeConfig = (): RuntimeConfig => {
 
 const runtimeConfig = getRuntimeConfig();
 
-// 3. Strict Validation Logic
+// 3. Strict Validation Logic (using clean keys)
 const requiredKeys = [
-  'REACT_APP_FIREBASE_API_KEY',
-  'REACT_APP_FIREBASE_AUTH_DOMAIN',
-  'REACT_APP_FIREBASE_PROJECT_ID',
-  'REACT_APP_FIREBASE_STORAGE_BUCKET',
-  'REACT_APP_FIREBASE_MESSAGING_SENDER_ID',
-  'REACT_APP_FIREBASE_APP_ID'
+  'FIREBASE_API_KEY',
+  'FIREBASE_AUTH_DOMAIN',
+  'FIREBASE_PROJECT_ID',
+  'FIREBASE_STORAGE_BUCKET',
+  'FIREBASE_MESSAGING_SENDER_ID',
+  'FIREBASE_APP_ID'
 ] as const;
 
 // Helper: Detect invalid/placeholder values
@@ -67,12 +67,12 @@ if (firebaseConfigError) {
 } else {
   try {
     const config = {
-      apiKey: runtimeConfig.REACT_APP_FIREBASE_API_KEY,
-      authDomain: runtimeConfig.REACT_APP_FIREBASE_AUTH_DOMAIN,
-      projectId: runtimeConfig.REACT_APP_FIREBASE_PROJECT_ID,
-      storageBucket: runtimeConfig.REACT_APP_FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: runtimeConfig.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-      appId: runtimeConfig.REACT_APP_FIREBASE_APP_ID
+      apiKey: runtimeConfig.FIREBASE_API_KEY,
+      authDomain: runtimeConfig.FIREBASE_AUTH_DOMAIN,
+      projectId: runtimeConfig.FIREBASE_PROJECT_ID,
+      storageBucket: runtimeConfig.FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: runtimeConfig.FIREBASE_MESSAGING_SENDER_ID,
+      appId: runtimeConfig.FIREBASE_APP_ID
     };
 
     projectId = config.projectId;
