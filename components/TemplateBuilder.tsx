@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2, HelpCircle, AlertCircle } from 'lucide-react';
 import { GameTemplate, Category, Question, Difficulty } from '../types';
@@ -52,10 +53,24 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   const isLocked = genState.status === 'GENERATING' || genState.status === 'APPLYING';
 
   // --- MUTATION GUARDS ---
-  const guardedSetCategories = (updater: Category[] | ((prev: Category[]) => Category[])) => {
-    if (isLocked) {
-      // Fix: logger.warn expects 1-2 arguments
-      logger.warn('Category mutation blocked during generation', { status: genState.status, type: 'MUTATION' });
+  
+  /**
+   * Guards state updates.
+   * Allows internal AI updates but blocks user interactions while generating.
+   */
+  const guardedSetCategories = (
+    updater: Category[] | ((prev: Category[]) => Category[]), 
+    meta?: { source: string; genId?: string }
+  ) => {
+    const isAiApply = meta?.source === 'AI_GENERATION' && meta?.genId === currentGenId.current;
+    
+    if (isLocked && !isAiApply) {
+      logger.warn('Mutation blocked during generation lock', { 
+        status: genState.status, 
+        source: meta?.source || 'USER',
+        currentGenId: currentGenId.current,
+        incomingGenId: meta?.genId
+      });
       return;
     }
     setCategories(updater);
@@ -143,6 +158,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     currentGenId.current = genId;
     snapshotRef.current = [...categories];
     setGenState({ status: 'GENERATING', id: genId, stage });
+    logger.info('aiGen_lifecycle_start', { genId, stage });
     return genId;
   };
 
@@ -153,28 +169,35 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     const genId = startAiGeneration('Populating entire board...');
 
     try {
-      const generatedCats = await generateTriviaGame(prompt, difficulty, categories.length, categories[0].questions.length, config.pointScale);
+      const generatedCats = await generateTriviaGame(
+        prompt, 
+        difficulty, 
+        config.catCount, 
+        config.rowCount, 
+        config.pointScale, 
+        genId
+      );
       
-      // Concurrency check: Discard if another generation started
       if (currentGenId.current !== genId) {
-        // Fix: logger.info expects 1-2 arguments
-        logger.info('Discarded stale generation result', { genId, type: 'AI' });
+        logger.info('aiGen_stale_discarded', { genId });
         return;
       }
 
       setGenState(prev => ({ ...prev, status: 'APPLYING' }));
       
-      // Atomic apply
-      setCategories(generatedCats);
+      // Atomic apply via guarded setter with bypass tag
+      guardedSetCategories(generatedCats, { source: 'AI_GENERATION', genId });
       setConfig(prev => ({...prev, title: prompt}));
       
       setGenState({ status: 'COMPLETE', id: null, stage: '' });
+      logger.info('aiGen_lifecycle_success', { genId });
       addToast('success', 'Board populated by AI.');
-    } catch (e) {
+    } catch (e: any) {
       if (currentGenId.current === genId) {
+        logger.error('aiGen_lifecycle_error', { genId, error: e.message });
         setGenState({ status: 'FAILED', id: null, stage: '' });
         if (snapshotRef.current) setCategories(snapshotRef.current);
-        addToast('error', 'AI Generation failed.');
+        addToast('error', 'AI Generation failed. Please try a different topic.');
       }
     }
   };
@@ -188,13 +211,12 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
 
     try {
       const cat = categories[cIdx];
-      const newQs = await generateCategoryQuestions(config.title, cat.title, cat.questions.length, 'mixed', config.pointScale);
+      const newQs = await generateCategoryQuestions(config.title, cat.title, cat.questions.length, 'mixed', config.pointScale, genId);
       
       if (currentGenId.current !== genId) return;
 
       setGenState(prev => ({ ...prev, status: 'APPLYING' }));
       
-      // Atomic apply to specific category
       const newCats = [...categories];
       newCats[cIdx] = {
         ...cat,
@@ -204,7 +226,8 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
           id: cat.questions[i]?.id || nq.id 
         }))
       };
-      setCategories(newCats);
+      
+      guardedSetCategories(newCats, { source: 'AI_GENERATION', genId });
       
       setGenState({ status: 'COMPLETE', id: null, stage: '' });
       addToast('success', `Category "${cat.title}" rewritten.`);
@@ -226,7 +249,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     try {
       const cat = categories[cIdx];
       const q = cat.questions[qIdx];
-      const result = await generateSingleQuestion(config.title, q.points, cat.title);
+      const result = await generateSingleQuestion(config.title, q.points, cat.title, 'mixed', genId);
       
       if (currentGenId.current !== genId) return;
 
@@ -239,7 +262,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
       };
       newCats[cIdx].questions[qIdx] = { ...q, text: result.text, answer: result.answer };
       
-      setCategories(newCats);
+      guardedSetCategories(newCats, { source: 'AI_GENERATION', genId });
       setGenState({ status: 'COMPLETE', id: null, stage: '' });
       addToast('success', 'Question generated.');
     } catch (e) {
@@ -381,7 +404,8 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                <AiToolbar disabled={isLocked} onGenerate={(prompt, diff) => {
                   soundService.playClick();
                   setConfig(p => ({...p, title: prompt}));
-                  // Initialize structure then fill
+                  
+                  // Initialize board structure immediately to give visual feedback before AI starts filling
                   const newCats = Array.from({ length: config.catCount }).map((_, cI) => ({
                     id: Math.random().toString(),
                     title: `Category ${cI + 1}`,
