@@ -1,3 +1,4 @@
+
 import { LogLevel, LogEntry } from '../types';
 
 class Logger {
@@ -9,7 +10,8 @@ class Logger {
   }
 
   // Sanitize sensitive data
-  private maskPII(data: any): any {
+  // Changed from private to public to allow testing
+  public maskPII(data: any): any {
     if (typeof data === 'string') {
       // Mask Email
       let text = data.replace(/([a-zA-Z0-9._-]+)(@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi, (match, user, domain) => {

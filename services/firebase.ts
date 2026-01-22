@@ -61,7 +61,9 @@ let projectId: string | undefined;
 
 if (firebaseConfigError) {
   // Log the error but don't throw, allowing the UI to render the error screen
-  logger.error('CONFIG', 'Firebase Configuration Missing or Invalid', {
+  // Fix: logger.error expects 1-2 arguments
+  logger.error('Firebase Configuration Missing or Invalid', {
+    category: 'CONFIG',
     missingKeys,
     configState: 'partial_or_empty',
     correlationId: logger.getCorrelationId()
@@ -82,10 +84,12 @@ if (firebaseConfigError) {
     // Singleton Pattern: Prevent multiple initializations (e.g. during hot reload)
     if (!getApps().length) {
       app = initializeApp(config);
-      logger.info('SYSTEM', 'Firebase App Initialized', { projectId });
+      // Fix: logger.info expects 1-2 arguments
+      logger.info('Firebase App Initialized', { category: 'SYSTEM', projectId });
     } else {
       app = getApps()[0];
-      logger.info('SYSTEM', 'Firebase App Re-used', { projectId });
+      // Fix: logger.info expects 1-2 arguments
+      logger.info('Firebase App Re-used', { category: 'SYSTEM', projectId });
     }
 
     // Initialize Services
@@ -95,11 +99,14 @@ if (firebaseConfigError) {
 
     // Auto-authenticate anonymously to ensure a valid auth context
     signInAnonymously(auth).catch((err) => {
-      logger.warn('AUTH', 'Anonymous Auth Failed', { error: err.message });
+      // Fix: logger.warn expects 1-2 arguments
+      logger.warn('Anonymous Auth Failed', { category: 'AUTH', error: err.message });
     });
     
   } catch (error: any) {
-    logger.error('SYSTEM', 'Firebase Critical Failure During Init', {
+    // Fix: logger.error expects 1-2 arguments
+    logger.error('Firebase Critical Failure During Init', {
+      category: 'SYSTEM',
       message: error.message,
       correlationId: logger.getCorrelationId()
     });

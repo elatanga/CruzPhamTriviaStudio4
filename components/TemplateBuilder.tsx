@@ -1,10 +1,18 @@
-
-import React, { useState, useEffect } from 'react';
-import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2, HelpCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2, HelpCircle, AlertCircle } from 'lucide-react';
 import { GameTemplate, Category, Question, Difficulty } from '../types';
 import { generateTriviaGame, generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { dataService } from '../services/dataService';
 import { soundService } from '../services/soundService';
+import { logger } from '../services/logger';
+
+type GenerationStatus = 'IDLE' | 'GENERATING' | 'APPLYING' | 'COMPLETE' | 'FAILED' | 'CANCELED';
+
+interface GenerationState {
+  status: GenerationStatus;
+  id: string | null;
+  stage: string;
+}
 
 interface Props {
   showId: string;
@@ -15,10 +23,14 @@ interface Props {
 }
 
 export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onClose, onSave, addToast }) => {
-  // --- STATE ---
+  // --- STATE MACHINE ---
+  const [genState, setGenState] = useState<GenerationState>({ status: 'IDLE', id: null, stage: '' });
   const [step, setStep] = useState<'CONFIG' | 'BUILDER'>(initialTemplate ? 'BUILDER' : 'CONFIG');
-  const [isAiLoading, setIsAiLoading] = useState(false);
   
+  // Snapshots for rollback
+  const snapshotRef = useRef<Category[] | null>(null);
+  const currentGenId = useRef<string | null>(null);
+
   // Config State
   const [config, setConfig] = useState({
     title: initialTemplate?.topic || '',
@@ -27,7 +39,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     pointScale: initialTemplate?.config?.pointScale || 100
   });
 
-  // Player Names State - Initialize from template or defaults
+  // Player Names State
   const [playerNames, setPlayerNames] = useState<string[]>(
     initialTemplate?.config?.playerNames || 
     (initialTemplate?.config?.playerCount ? Array.from({length: initialTemplate.config.playerCount}).map((_, i) => `Player ${i+1}`) : ['Player 1', 'Player 2', 'Player 3', 'Player 4'])
@@ -37,14 +49,20 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   const [categories, setCategories] = useState<Category[]>(initialTemplate?.categories || []);
   const [editCell, setEditCell] = useState<{cIdx: number, qIdx: number} | null>(null);
   
-  // Initialize blank board if new
-  useEffect(() => {
-    if (!initialTemplate && step === 'CONFIG') {
-      // Waiting for user to click "Start Building"
+  const isLocked = genState.status === 'GENERATING' || genState.status === 'APPLYING';
+
+  // --- MUTATION GUARDS ---
+  const guardedSetCategories = (updater: Category[] | ((prev: Category[]) => Category[])) => {
+    if (isLocked) {
+      // Fix: logger.warn expects 1-2 arguments
+      logger.warn('Category mutation blocked during generation', { status: genState.status, type: 'MUTATION' });
+      return;
     }
-  }, [initialTemplate]);
+    setCategories(updater);
+  };
 
   const initBoard = () => {
+    if (isLocked) return;
     soundService.playClick();
     if (!config.title.trim()) {
       addToast('error', 'Title is required');
@@ -57,7 +75,6 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     }
 
     const newCats: Category[] = Array.from({ length: config.catCount }).map((_, cI) => {
-      // Randomly assign Double Or Nothing
       const luckyIndex = Math.floor(Math.random() * config.rowCount);
       return {
         id: Math.random().toString(),
@@ -80,9 +97,9 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   // --- ACTIONS ---
 
   const handleSave = () => {
+    if (isLocked) return;
     soundService.playClick();
     try {
-      // Enforce: Each category must have exactly one Double Or Nothing
       const validatedCategories = categories.map(cat => {
         if (cat.questions.some(q => q.isDoubleOrNothing)) return cat;
         const lucky = Math.floor(Math.random() * cat.questions.length);
@@ -121,78 +138,134 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     }
   };
 
+  const startAiGeneration = (stage: string) => {
+    const genId = crypto.randomUUID();
+    currentGenId.current = genId;
+    snapshotRef.current = [...categories];
+    setGenState({ status: 'GENERATING', id: genId, stage });
+    return genId;
+  };
+
   const handleAiFillBoard = async (prompt: string, difficulty: Difficulty) => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || isLocked) return;
     soundService.playClick();
-    setIsAiLoading(true);
+    
+    const genId = startAiGeneration('Populating entire board...');
+
     try {
       const generatedCats = await generateTriviaGame(prompt, difficulty, categories.length, categories[0].questions.length, config.pointScale);
+      
+      // Concurrency check: Discard if another generation started
+      if (currentGenId.current !== genId) {
+        // Fix: logger.info expects 1-2 arguments
+        logger.info('Discarded stale generation result', { genId, type: 'AI' });
+        return;
+      }
+
+      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
+      
+      // Atomic apply
       setCategories(generatedCats);
       setConfig(prev => ({...prev, title: prompt}));
+      
+      setGenState({ status: 'COMPLETE', id: null, stage: '' });
       addToast('success', 'Board populated by AI.');
     } catch (e) {
-      addToast('error', 'AI Generation failed.');
-    } finally {
-      setIsAiLoading(false);
+      if (currentGenId.current === genId) {
+        setGenState({ status: 'FAILED', id: null, stage: '' });
+        if (snapshotRef.current) setCategories(snapshotRef.current);
+        addToast('error', 'AI Generation failed.');
+      }
     }
   };
 
   const handleAiRewriteCategory = async (cIdx: number) => {
+    if (isLocked) return;
     soundService.playClick();
     if (!confirm('Rewrite entire category? Existing content will be lost.')) return;
-    setIsAiLoading(true);
+    
+    const genId = startAiGeneration(`Rewriting category: ${categories[cIdx].title}`);
+
     try {
       const cat = categories[cIdx];
       const newQs = await generateCategoryQuestions(config.title, cat.title, cat.questions.length, 'mixed', config.pointScale);
       
+      if (currentGenId.current !== genId) return;
+
+      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
+      
+      // Atomic apply to specific category
       const newCats = [...categories];
-      newCats[cIdx].questions = newQs.map((nq, i) => ({
-        ...nq,
-        points: (i + 1) * config.pointScale,
-        id: cat.questions[i]?.id || nq.id 
-      }));
+      newCats[cIdx] = {
+        ...cat,
+        questions: newQs.map((nq, i) => ({
+          ...nq,
+          points: (i + 1) * config.pointScale,
+          id: cat.questions[i]?.id || nq.id 
+        }))
+      };
       setCategories(newCats);
+      
+      setGenState({ status: 'COMPLETE', id: null, stage: '' });
       addToast('success', `Category "${cat.title}" rewritten.`);
     } catch (e) {
-      addToast('error', 'AI Failed to rewrite category.');
-    } finally {
-      setIsAiLoading(false);
+      if (currentGenId.current === genId) {
+        setGenState({ status: 'FAILED', id: null, stage: '' });
+        if (snapshotRef.current) setCategories(snapshotRef.current);
+        addToast('error', 'AI Failed to rewrite category.');
+      }
     }
   };
 
   const handleMagicCell = async (cIdx: number, qIdx: number) => {
+    if (isLocked) return;
     soundService.playClick();
-    setIsAiLoading(true);
+    
+    const genId = startAiGeneration('Generating single question...');
+
     try {
       const cat = categories[cIdx];
       const q = cat.questions[qIdx];
       const result = await generateSingleQuestion(config.title, q.points, cat.title);
       
+      if (currentGenId.current !== genId) return;
+
+      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
+      
       const newCats = [...categories];
+      newCats[cIdx] = {
+        ...newCats[cIdx],
+        questions: [...newCats[cIdx].questions]
+      };
       newCats[cIdx].questions[qIdx] = { ...q, text: result.text, answer: result.answer };
+      
       setCategories(newCats);
+      setGenState({ status: 'COMPLETE', id: null, stage: '' });
       addToast('success', 'Question generated.');
     } catch (e) {
-      addToast('error', 'Failed to generate question.');
-    } finally {
-      setIsAiLoading(false);
+      if (currentGenId.current === genId) {
+        setGenState({ status: 'FAILED', id: null, stage: '' });
+        addToast('error', 'Failed to generate question.');
+      }
     }
   };
 
   const updateCell = (text: string, answer: string) => {
-    if (!editCell) return;
+    if (!editCell || isLocked) return;
     soundService.playClick();
     const { cIdx, qIdx } = editCell;
     const newCats = [...categories];
+    newCats[cIdx] = { ...newCats[cIdx], questions: [...newCats[cIdx].questions] };
     newCats[cIdx].questions[qIdx] = { ...newCats[cIdx].questions[qIdx], text, answer };
-    setCategories(newCats);
+    guardedSetCategories(newCats);
     setEditCell(null);
   };
 
   const updateCatTitle = (cIdx: number, val: string) => {
+    if (isLocked) return;
     const newCats = [...categories];
-    newCats[cIdx].title = val;
-    setCategories(newCats);
+    newCats[cIdx] = { ...newCats[cIdx], title: val };
+    guardedSetCategories(newCats);
   };
 
   // --- RENDER ---
@@ -207,8 +280,9 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
             <div>
               <label className="block text-xs uppercase text-gold-500 font-bold mb-1">Trivia Game Title</label>
               <input 
+                disabled={isLocked}
                 value={config.title} onChange={e => setConfig(p => ({...p, title: e.target.value}))}
-                className="w-full bg-black border border-zinc-700 p-3 rounded text-white focus:border-gold-500 outline-none"
+                className="w-full bg-black border border-zinc-700 p-3 rounded text-white focus:border-gold-500 outline-none disabled:opacity-50"
                 placeholder="e.g. Science Night 2024" autoFocus
               />
               <p className="text-[10px] text-zinc-500 mt-1">This will be the main topic for AI generation.</p>
@@ -221,17 +295,17 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                 <div className="flex justify-between items-center">
                     <label className="text-xs text-zinc-300">Categories (1-8)</label>
                     <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
-                      <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, catCount: Math.max(1, p.catCount - 1)}))}} className="text-gold-500 hover:text-white p-1"><Minus className="w-3 h-3" /></button>
+                      <button disabled={isLocked} onClick={() => { soundService.playClick(); setConfig(p => ({...p, catCount: Math.max(1, p.catCount - 1)}))}} className="text-gold-500 hover:text-white p-1 disabled:opacity-30"><Minus className="w-3 h-3" /></button>
                       <span className="text-sm font-mono text-white w-4 text-center">{config.catCount}</span>
-                      <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, catCount: Math.min(8, p.catCount + 1)}))}} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
+                      <button disabled={isLocked} onClick={() => { soundService.playClick(); setConfig(p => ({...p, catCount: Math.min(8, p.catCount + 1)}))}} className="text-gold-500 hover:text-white p-1 disabled:opacity-30"><Plus className="w-3 h-3" /></button>
                     </div>
                 </div>
                 <div className="flex justify-between items-center">
                     <label className="text-xs text-zinc-300">Rows (1-10)</label>
                     <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
-                      <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, rowCount: Math.max(1, p.rowCount - 1)}))}} className="text-gold-500 hover:text-white p-1"><Minus className="w-3 h-3" /></button>
+                      <button disabled={isLocked} onClick={() => { soundService.playClick(); setConfig(p => ({...p, rowCount: Math.max(1, p.rowCount - 1)}))}} className="text-gold-500 hover:text-white p-1 disabled:opacity-30"><Minus className="w-3 h-3" /></button>
                       <span className="text-sm font-mono text-white w-4 text-center">{config.rowCount}</span>
-                      <button onClick={() => { soundService.playClick(); setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))}} className="text-gold-500 hover:text-white p-1"><Plus className="w-3 h-3" /></button>
+                      <button disabled={isLocked} onClick={() => { soundService.playClick(); setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))}} className="text-gold-500 hover:text-white p-1 disabled:opacity-30"><Plus className="w-3 h-3" /></button>
                     </div>
                 </div>
 
@@ -246,16 +320,14 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                         {[10, 20, 25, 100].map(val => (
                             <button
                                 key={val}
+                                disabled={isLocked}
                                 onClick={() => { soundService.playClick(); setConfig(p => ({...p, pointScale: val})); }}
-                                className={`px-2 py-1 text-xs font-mono rounded ${config.pointScale === val ? 'bg-gold-600 text-black font-bold' : 'text-zinc-500 hover:text-white'}`}
+                                className={`px-2 py-1 text-xs font-mono rounded disabled:opacity-50 ${config.pointScale === val ? 'bg-gold-600 text-black font-bold' : 'text-zinc-500 hover:text-white'}`}
                             >
                                 {val}
                             </button>
                         ))}
                     </div>
-                </div>
-                <div className="text-[10px] text-zinc-500 font-mono text-right">
-                    Range: {config.pointScale} - {config.pointScale * config.rowCount}
                 </div>
               </div>
 
@@ -265,7 +337,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                    <h3 className="text-xs uppercase text-zinc-400 font-bold flex items-center gap-2">
                      Contestants <span className="bg-zinc-800 text-zinc-500 px-1 rounded text-[10px]">{playerNames.length}/8</span>
                    </h3>
-                   {playerNames.length < 8 && (
+                   {playerNames.length < 8 && !isLocked && (
                      <button onClick={() => { soundService.playClick(); setPlayerNames([...playerNames, `Player ${playerNames.length + 1}`])}} className="text-[10px] text-gold-500 hover:text-white flex items-center gap-1">
                        <Plus className="w-3 h-3" /> ADD
                      </button>
@@ -275,16 +347,17 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                    {playerNames.map((name, idx) => (
                      <div key={idx} className="flex gap-2">
                         <input 
+                            disabled={isLocked}
                             value={name} 
                             onChange={(e) => {
                                 const newNames = [...playerNames];
                                 newNames[idx] = e.target.value;
                                 setPlayerNames(newNames);
                             }}
-                            className="flex-1 bg-black border border-zinc-800 p-1.5 rounded text-white text-xs focus:border-gold-500 outline-none placeholder:text-zinc-700"
+                            className="flex-1 bg-black border border-zinc-800 p-1.5 rounded text-white text-xs focus:border-gold-500 outline-none placeholder:text-zinc-700 disabled:opacity-50"
                             placeholder={`Player ${idx+1}`}
                         />
-                        {playerNames.length > 1 && (
+                        {playerNames.length > 1 && !isLocked && (
                             <button onClick={() => { soundService.playClick(); setPlayerNames(playerNames.filter((_, i) => i !== idx))}} className="text-zinc-600 hover:text-red-500 px-1">
                                 <Trash2 className="w-3 h-3" />
                             </button>
@@ -296,10 +369,16 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
             </div>
             
             {/* AI Generator In Config */}
-            <div className="bg-zinc-950 p-4 rounded border border-zinc-800">
+            <div className="bg-zinc-950 p-4 rounded border border-zinc-800 relative overflow-hidden">
+               {isLocked && (
+                 <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center backdrop-blur-sm animate-in fade-in">
+                    <Loader2 className="w-6 h-6 text-gold-500 animate-spin mb-2" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-gold-500">{genState.stage}</span>
+                 </div>
+               )}
                <h3 className="text-xs uppercase text-gold-600 font-bold mb-2 flex items-center gap-2"><Wand2 className="w-3 h-3" /> Magic Generator</h3>
                <p className="text-[10px] text-zinc-500 mb-3">Skip manual entry and let AI build the entire board instantly.</p>
-               <AiToolbar onGenerate={(prompt, diff) => {
+               <AiToolbar disabled={isLocked} onGenerate={(prompt, diff) => {
                   soundService.playClick();
                   setConfig(p => ({...p, title: prompt}));
                   // Initialize structure then fill
@@ -313,25 +392,16 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                   }));
                   setCategories(newCats);
                   setStep('BUILDER');
-                  // Trigger generation
-                  setIsAiLoading(true);
-                  generateTriviaGame(prompt, diff, config.catCount, config.rowCount, config.pointScale).then(generated => {
-                      setCategories(generated);
-                      setIsAiLoading(false);
-                      addToast('success', 'Board generated!');
-                  }).catch(() => {
-                      setIsAiLoading(false);
-                      addToast('error', 'Generation failed');
-                  });
+                  handleAiFillBoard(prompt, diff);
                }} />
             </div>
 
           </div>
 
           <div className="flex gap-3 mt-8 pt-4 border-t border-zinc-800 flex-none">
-             <button onClick={() => { soundService.playClick(); onClose(); }} className="flex-1 py-3 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 text-sm">Cancel</button>
-             <button onClick={initBoard} disabled={!config.title || isAiLoading} className="flex-1 py-3 rounded bg-gold-600 text-black font-bold hover:bg-gold-500 disabled:opacity-50 text-sm flex items-center justify-center gap-2 uppercase tracking-wide">
-               {isAiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Template'}
+             <button disabled={isLocked} onClick={() => { soundService.playClick(); onClose(); }} className="flex-1 py-3 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 text-sm disabled:opacity-30">Cancel</button>
+             <button onClick={initBoard} disabled={!config.title || isLocked} className="flex-1 py-3 rounded bg-gold-600 text-black font-bold hover:bg-gold-500 disabled:opacity-50 text-sm flex items-center justify-center gap-2 uppercase tracking-wide">
+                Start Building
              </button>
           </div>
         </div>
@@ -342,22 +412,36 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   return (
     <div className="fixed inset-0 z-40 bg-black flex flex-col animate-in fade-in duration-200">
       {/* HEADER */}
-      <div className="h-16 bg-zinc-900 border-b border-gold-900/30 flex items-center justify-between px-6">
+      <div className="h-16 bg-zinc-900 border-b border-gold-900/30 flex items-center justify-between px-6 shrink-0">
         <div className="flex items-center gap-4">
-          <button onClick={() => { soundService.playClick(); onClose(); }} className="text-zinc-500 hover:text-white"><X className="w-6 h-6" /></button>
+          <button disabled={isLocked} onClick={() => { soundService.playClick(); onClose(); }} className="text-zinc-500 hover:text-white disabled:opacity-30"><X className="w-6 h-6" /></button>
           <input 
+            disabled={isLocked}
             value={config.title} 
             onChange={e => setConfig(p => ({...p, title: e.target.value}))}
-            className="bg-transparent text-xl font-serif text-gold-500 font-bold outline-none border-b border-transparent focus:border-gold-500 placeholder:text-zinc-700"
+            className="bg-transparent text-xl font-serif text-gold-500 font-bold outline-none border-b border-transparent focus:border-gold-500 placeholder:text-zinc-700 disabled:opacity-50"
             placeholder="Template Title"
           />
         </div>
         <div className="flex items-center gap-3">
-           {isAiLoading && <div className="flex items-center gap-2 text-gold-400 text-xs animate-pulse"><Loader2 className="w-4 h-4 animate-spin" /> AI Processing...</div>}
-           <AiToolbar onGenerate={handleAiFillBoard} />
-           <button onClick={handleSave} className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-4 py-2 rounded flex items-center gap-2"><Save className="w-4 h-4" /> Save</button>
+           <AiToolbar disabled={isLocked} onGenerate={handleAiFillBoard} />
+           <button disabled={isLocked} onClick={handleSave} className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-4 py-2 rounded flex items-center gap-2 disabled:opacity-50"><Save className="w-4 h-4" /> Save</button>
         </div>
       </div>
+
+      {/* GENERATION OVERLAY */}
+      {isLocked && (
+        <div className="absolute inset-0 top-16 z-50 bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center text-center p-8 animate-in fade-in">
+           <div className="bg-zinc-900 border border-gold-600/50 p-8 rounded-2xl shadow-2xl max-w-sm w-full">
+              <Loader2 className="w-10 h-10 text-gold-500 animate-spin mx-auto mb-4" />
+              <h3 className="text-white font-serif text-xl mb-2">AI Studio Working</h3>
+              <p className="text-zinc-400 text-sm mb-6">{genState.stage}</p>
+              <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
+                 <div className="h-full bg-gold-500 animate-[loading_2s_infinite]" />
+              </div>
+           </div>
+        </div>
+      )}
 
       {/* GRID EDITOR */}
       <div className="flex-1 overflow-auto p-4 custom-scrollbar">
@@ -370,29 +454,35 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
               {/* Header */}
               <div className="relative group/header">
                 <input 
+                  disabled={isLocked}
                   value={cat.title}
                   onChange={(e) => updateCatTitle(cIdx, e.target.value)}
-                  className="w-full bg-gold-700 text-black font-bold text-center p-3 rounded uppercase text-sm border-b-4 border-gold-900 outline-none focus:bg-gold-600"
+                  className="w-full bg-gold-700 text-black font-bold text-center p-3 rounded uppercase text-sm border-b-4 border-gold-900 outline-none focus:bg-gold-600 disabled:opacity-80"
                 />
-                <button 
-                  onClick={() => handleAiRewriteCategory(cIdx)}
-                  className="absolute top-1 right-1 p-1 bg-black/20 hover:bg-black/50 rounded text-black hover:text-white opacity-0 group-hover/header:opacity-100 transition-opacity"
-                  title="AI Rewrite Category"
-                >
-                  <Wand2 className="w-3 h-3" />
-                </button>
+                {!isLocked && (
+                  <button 
+                    onClick={() => handleAiRewriteCategory(cIdx)}
+                    className="absolute top-1 right-1 p-1 bg-black/20 hover:bg-black/50 rounded text-black hover:text-white opacity-0 group-hover/header:opacity-100 transition-opacity"
+                    title="AI Rewrite Category"
+                  >
+                    <Wand2 className="w-3 h-3" />
+                  </button>
+                )}
               </div>
 
               {/* Rows */}
               {cat.questions.map((q, qIdx) => (
                 <div 
                   key={q.id}
-                  onClick={() => { soundService.playSelect(); setEditCell({cIdx, qIdx}); }}
-                  className="bg-zinc-900 border border-zinc-800 hover:border-gold-500 text-gold-400 font-serif font-bold text-2xl flex-1 flex flex-col items-center justify-center rounded cursor-pointer relative group transition-all"
+                  onClick={() => { if(!isLocked) { soundService.playSelect(); setEditCell({cIdx, qIdx}); } }}
+                  className={`
+                    bg-zinc-900 border border-zinc-800 hover:border-gold-500 text-gold-400 font-serif font-bold text-2xl flex-1 flex flex-col items-center justify-center rounded relative group transition-all
+                    ${isLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
+                  `}
                 >
                   <span className={q.isDoubleOrNothing ? 'text-red-500' : ''}>{q.points}</span>
                   {q.isDoubleOrNothing && <div className="absolute top-1 right-1 text-[8px] bg-red-900 text-white px-1 rounded">2X</div>}
-                  {(q.text !== 'Enter question text...') && (
+                  {(q.text && q.text !== 'Enter question text...') && (
                     <div className="absolute bottom-2 right-2 w-2 h-2 bg-green-500 rounded-full" title="Has Content" />
                   )}
                 </div>
@@ -403,7 +493,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
       </div>
 
       {/* EDIT MODAL */}
-      {editCell && (() => {
+      {editCell && !isLocked && (() => {
          const { cIdx, qIdx } = editCell;
          const q = categories[cIdx].questions[qIdx];
          return (
@@ -416,7 +506,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                
                <div className="space-y-4">
                  <div>
-                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">Question <HelpCircle className="w-3 h-3 cursor-help" title="The text displayed to the host/players" /></label>
+                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">Question <span title="The text displayed to the host/players"><HelpCircle className="w-3 h-3 cursor-help" /></span></label>
                    <textarea 
                      id="edit-q-text"
                      defaultValue={q.text}
@@ -424,7 +514,7 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                    />
                  </div>
                  <div>
-                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">Answer <HelpCircle className="w-3 h-3 cursor-help" title="Hidden until revealed by host" /></label>
+                   <label className="text-xs uppercase text-zinc-500 font-bold flex justify-between">Answer <span title="Hidden until revealed by host"><HelpCircle className="w-3 h-3 cursor-help" /></span></label>
                    <textarea 
                      id="edit-q-answer"
                      defaultValue={q.answer}
@@ -439,7 +529,8 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                       onChange={(e) => {
                          soundService.playClick();
                          const newCats = [...categories];
-                         newCats[cIdx].questions[qIdx].isDoubleOrNothing = e.target.checked;
+                         newCats[cIdx] = { ...newCats[cIdx], questions: [...newCats[cIdx].questions] };
+                         newCats[cIdx].questions[qIdx] = { ...newCats[cIdx].questions[qIdx], isDoubleOrNothing: e.target.checked };
                          setCategories(newCats);
                       }}
                       className="accent-gold-600 w-4 h-4"
@@ -470,18 +561,25 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
            </div>
          );
       })()}
+      
+      <style>{`
+        @keyframes loading {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(400%); }
+        }
+      `}</style>
     </div>
   );
 };
 
-const AiToolbar: React.FC<{ onGenerate: (p: string, d: Difficulty) => void }> = ({ onGenerate }) => {
+const AiToolbar: React.FC<{ disabled?: boolean, onGenerate: (p: string, d: Difficulty) => void }> = ({ disabled, onGenerate }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [diff, setDiff] = useState<Difficulty>('mixed');
 
   if (!isOpen) {
     return (
-      <button onClick={() => { soundService.playClick(); setIsOpen(true); }} className="text-gold-500 border border-gold-600/50 hover:bg-gold-900/20 px-3 py-2 rounded flex items-center gap-2 text-xs uppercase font-bold transition-all">
+      <button disabled={disabled} onClick={() => { soundService.playClick(); setIsOpen(true); }} className="text-gold-500 border border-gold-600/50 hover:bg-gold-900/20 px-3 py-2 rounded flex items-center gap-2 text-xs uppercase font-bold transition-all disabled:opacity-30">
         <Wand2 className="w-4 h-4" /> AI Generate
       </button>
     );
@@ -490,23 +588,25 @@ const AiToolbar: React.FC<{ onGenerate: (p: string, d: Difficulty) => void }> = 
   return (
     <div className="flex items-center gap-2 bg-zinc-800 p-1 rounded border border-gold-500/30 animate-in slide-in-from-top-2">
       <input 
+        disabled={disabled}
         value={prompt}
         onChange={e => setPrompt(e.target.value)}
         placeholder="Topic for board..."
-        className="bg-black text-white text-xs p-2 rounded w-48 border border-zinc-700 focus:border-gold-500 outline-none"
+        className="bg-black text-white text-xs p-2 rounded w-48 border border-zinc-700 focus:border-gold-500 outline-none disabled:opacity-50"
       />
       <select 
+        disabled={disabled}
         value={diff} 
         onChange={e => setDiff(e.target.value as Difficulty)}
-        className="bg-black text-white text-xs p-2 rounded border border-zinc-700 outline-none"
+        className="bg-black text-white text-xs p-2 rounded border border-zinc-700 outline-none disabled:opacity-50"
       >
         <option value="easy">Easy</option>
         <option value="medium">Medium</option>
         <option value="hard">Hard</option>
         <option value="mixed">Mixed</option>
       </select>
-      <button onClick={() => { onGenerate(prompt, diff); setIsOpen(false); }} className="bg-purple-600 hover:bg-purple-500 text-white p-2 rounded"><Wand2 className="w-3 h-3" /></button>
-      <button onClick={() => { soundService.playClick(); setIsOpen(false); }} className="text-zinc-500 hover:text-white p-2"><X className="w-3 h-3" /></button>
+      <button disabled={disabled || !prompt} onClick={() => { onGenerate(prompt, diff); setIsOpen(false); }} className="bg-purple-600 hover:bg-purple-500 text-white p-2 rounded disabled:opacity-30"><Wand2 className="w-3 h-3" /></button>
+      <button disabled={disabled} onClick={() => { soundService.playClick(); setIsOpen(false); }} className="text-zinc-500 hover:text-white p-2 disabled:opacity-30"><X className="w-3 h-3" /></button>
     </div>
   );
 };
