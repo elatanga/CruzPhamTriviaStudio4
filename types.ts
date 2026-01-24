@@ -1,4 +1,3 @@
-
 export interface Question {
   id: string;
   text: string;
@@ -29,6 +28,12 @@ export interface GameTimer {
   isRunning: boolean;
 }
 
+export interface BoardViewSettings {
+  boardFontScale: number; // 0.85 - 1.35
+  tileScale: number; // 0.85 - 1.15
+  updatedAt: string;
+}
+
 export interface GameState {
   showTitle: string;
   isGameStarted: boolean;
@@ -39,6 +44,7 @@ export interface GameState {
   selectedPlayerId: string | null;
   history: string[];
   timer: GameTimer;
+  viewSettings: BoardViewSettings;
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
@@ -177,7 +183,7 @@ export type AuditAction =
   | 'BOOTSTRAP' 
   | 'LOGIN' 
   | 'TOKEN_ISSUED' 
-  | 'TOKEN_REFRESHED'
+  | 'TOKEN_REFRESHED' 
   | 'TOKEN_REVOKED'
   | 'ACCESS_GRANTED'
   | 'ACCESS_REVOKED'

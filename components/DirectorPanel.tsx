@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer } from 'lucide-react';
-import { GameState, Question, Difficulty, Category } from '../types';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Maximize2 } from 'lucide-react';
+import { GameState, Question, Difficulty, Category, BoardViewSettings } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
 import { soundService } from '../services/soundService';
@@ -40,6 +39,19 @@ export const DirectorPanel: React.FC<Props> = ({
     const newCats = [...gameState.categories];
     newCats[cIdx].title = title;
     onUpdateState({ ...gameState, categories: newCats });
+  };
+
+  // View Settings Actions
+  const updateViewSettings = (updates: Partial<BoardViewSettings>) => {
+    onUpdateState({
+      ...gameState,
+      viewSettings: {
+        ...gameState.viewSettings,
+        ...updates,
+        updatedAt: new Date().toISOString()
+      }
+    });
+    soundService.playClick();
   };
 
   // Timer Actions
@@ -226,32 +238,74 @@ export const DirectorPanel: React.FC<Props> = ({
         {activeTab === 'BOARD' && (
           <div className="space-y-6">
             
-            {/* Timer Control Panel */}
-            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                 <div className="text-gold-500"><Timer className="w-5 h-5" /></div>
-                 <div>
-                   <p className="text-xs font-bold uppercase text-zinc-400">Timer Control</p>
-                   <div className="flex gap-1 mt-1">
-                     {[15, 30, 60].map(d => (
-                       <button 
-                         key={d}
-                         onClick={() => updateTimer({ duration: d })}
-                         className={`px-2 py-0.5 text-[10px] rounded border ${gameState.timer.duration === d ? 'bg-gold-600 text-black border-gold-600' : 'bg-black text-zinc-400 border-zinc-800'}`}
-                       >
-                         {d}s
-                       </button>
-                     ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Timer Control Panel */}
+              <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                   <div className="text-gold-500"><Timer className="w-5 h-5" /></div>
+                   <div>
+                     <p className="text-xs font-bold uppercase text-zinc-400">Timer Control</p>
+                     <div className="flex gap-1 mt-1">
+                       {[15, 30, 60].map(d => (
+                         <button 
+                           key={d}
+                           onClick={() => updateTimer({ duration: d })}
+                           className={`px-2 py-0.5 text-[10px] rounded border ${gameState.timer.duration === d ? 'bg-gold-600 text-black border-gold-600' : 'bg-black text-zinc-400 border-zinc-800'}`}
+                         >
+                           {d}s
+                         </button>
+                       ))}
+                     </div>
                    </div>
-                 </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!gameState.timer.isRunning ? (
+                     <button onClick={startTimer} className="bg-green-600 hover:bg-green-500 text-white p-2 rounded-full"><Play className="w-4 h-4" /></button>
+                  ) : (
+                     <button onClick={stopTimer} className="bg-yellow-600 hover:bg-yellow-500 text-black p-2 rounded-full"><Pause className="w-4 h-4" /></button>
+                  )}
+                  <button onClick={resetTimer} className="bg-zinc-800 hover:bg-zinc-700 text-white p-2 rounded-full"><RotateCcw className="w-4 h-4" /></button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {!gameState.timer.isRunning ? (
-                   <button onClick={startTimer} className="bg-green-600 hover:bg-green-500 text-white p-2 rounded-full"><Play className="w-4 h-4" /></button>
-                ) : (
-                   <button onClick={stopTimer} className="bg-yellow-600 hover:bg-yellow-500 text-black p-2 rounded-full"><Pause className="w-4 h-4" /></button>
-                )}
-                <button onClick={resetTimer} className="bg-zinc-800 hover:bg-zinc-700 text-white p-2 rounded-full"><RotateCcw className="w-4 h-4" /></button>
+
+              {/* View/Scale Control Panel */}
+              <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex flex-col gap-3">
+                 <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                       <Type className="w-4 h-4 text-gold-500" />
+                       <span className="text-xs font-bold uppercase text-zinc-400">Board View Settings</span>
+                    </div>
+                 </div>
+                 <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Board Font Size</label>
+                       <div className="flex bg-black p-1 rounded gap-1 border border-zinc-800">
+                          { [0.85, 1.0, 1.15, 1.35].map((scale, i) => (
+                             <button 
+                                key={scale} 
+                                onClick={() => updateViewSettings({ boardFontScale: scale })}
+                                className={`px-2 py-1 text-[10px] font-bold rounded ${gameState.viewSettings?.boardFontScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
+                             >
+                                {['XS', 'S', 'M', 'L'][i]}
+                             </button>
+                          ))}
+                       </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Tile Padding</label>
+                       <div className="flex bg-black p-1 rounded gap-1 border border-zinc-800">
+                          { [0.85, 1.0, 1.15].map((scale, i) => (
+                             <button 
+                                key={scale} 
+                                onClick={() => updateViewSettings({ tileScale: scale })}
+                                className={`px-2 py-1 text-[10px] font-bold rounded ${gameState.viewSettings?.tileScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
+                             >
+                                {['Compact', 'Default', 'Large'][i]}
+                             </button>
+                          ))}
+                       </div>
+                    </div>
+                 </div>
               </div>
             </div>
 

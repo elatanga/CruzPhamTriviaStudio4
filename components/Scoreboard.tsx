@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Minus } from 'lucide-react';
-import { Player } from '../types';
+import { Player, BoardViewSettings } from '../types';
 import { soundService } from '../services/soundService';
 
 interface Props {
@@ -10,12 +10,15 @@ interface Props {
   onUpdateScore: (id: string, delta: number) => void;
   onSelectPlayer: (id: string) => void;
   gameActive: boolean;
+  viewSettings: BoardViewSettings;
 }
 
 export const Scoreboard: React.FC<Props> = ({ 
-  players, selectedPlayerId, onAddPlayer, onUpdateScore, onSelectPlayer 
+  players, selectedPlayerId, onAddPlayer, onUpdateScore, onSelectPlayer, viewSettings
 }) => {
   const [newName, setNewName] = useState('');
+
+  const fontScale = viewSettings?.boardFontScale || 1.0;
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,11 +30,11 @@ export const Scoreboard: React.FC<Props> = ({
   };
 
   return (
-    <div className="h-full flex flex-col border-t md:border-t-0 md:border-l border-gold-900/30 bg-black/95 w-full md:w-64 lg:w-72 shadow-2xl z-20">
+    <div className="h-full flex flex-col border-t md:border-t-0 md:border-l border-gold-900/30 bg-black/95 w-full md:w-64 lg:w-72 shadow-2xl z-20 font-roboto font-bold select-none">
       
       {/* Header */}
       <div className="flex-none p-3 border-b border-gold-900/30 bg-zinc-900/50 flex items-center justify-between">
-        <h3 className="font-serif text-gold-500 font-bold tracking-widest text-xs">PLAYERS ({players.length})</h3>
+        <h3 className="text-gold-500 tracking-widest text-xs uppercase">PLAYERS ({players.length})</h3>
       </div>
 
       {/* Players List */}
@@ -43,15 +46,15 @@ export const Scoreboard: React.FC<Props> = ({
               key={p.id} 
               onClick={() => onSelectPlayer(p.id)}
               className={`
-                relative p-2 rounded border transition-all duration-200 cursor-pointer group flex flex-col select-none
+                relative p-2 rounded border transition-all duration-200 cursor-pointer group flex flex-col
                 ${isSelected 
                   ? 'bg-gold-900/20 border-gold-500 shadow-[0_0_10px_rgba(255,215,0,0.1)]' 
                   : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600'}
               `}
             >
               <div className="flex justify-between items-center mb-1">
-                <span className={`font-bold truncate pr-2 text-sm max-w-[60%] ${isSelected ? 'text-white' : 'text-zinc-400'}`}>{p.name}</span>
-                <span className={`font-mono font-black text-lg ${isSelected ? 'text-gold-400' : 'text-zinc-600'}`}>
+                <span className={`truncate pr-2 text-sm max-w-[60%] ${isSelected ? 'text-white' : 'text-zinc-400'}`}>{p.name}</span>
+                <span className="font-mono font-black text-gold-400" style={{ fontSize: `calc(1.1rem * ${fontScale})` }}>
                   {p.score}
                 </span>
               </div>

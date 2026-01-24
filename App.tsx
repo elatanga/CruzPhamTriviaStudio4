@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppShell } from './components/AppShell';
 import { ToastContainer } from './components/Toast';
@@ -14,7 +13,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { authService } from './services/authService';
 import { dataService } from './services/dataService';
-import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session } from './types';
+import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session, BoardViewSettings } from './types';
 import { soundService } from './services/soundService';
 import { logger } from './services/logger';
 import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power } from 'lucide-react';
@@ -55,6 +54,11 @@ const App: React.FC = () => {
       duration: 30,
       endTime: null,
       isRunning: false
+    },
+    viewSettings: {
+      boardFontScale: 1.0,
+      tileScale: 1.0,
+      updatedAt: new Date().toISOString()
     }
   });
 
@@ -234,6 +238,10 @@ const App: React.FC = () => {
          const savedState = localStorage.getItem('cruzpham_gamestate');
          if (savedState) {
            const parsed = JSON.parse(savedState);
+           // Migration for viewSettings
+           if (!parsed.viewSettings) {
+             parsed.viewSettings = { boardFontScale: 1.0, tileScale: 1.0, updatedAt: new Date().toISOString() };
+           }
            setGameState(parsed);
            // Fallback: If no show active but game has title, create ghost active show for UI consistency
            if (parsed.showTitle && !activeShow) {
@@ -377,6 +385,12 @@ const App: React.FC = () => {
         duration: 30,
         endTime: null,
         isRunning: false
+      },
+      // Preserve settings from current show if they exist, or use defaults
+      viewSettings: gameState.viewSettings || {
+        boardFontScale: 1.0,
+        tileScale: 1.0,
+        updatedAt: new Date().toISOString()
       }
     };
     saveGameState(newState);
@@ -681,7 +695,7 @@ const App: React.FC = () => {
 
                             {/* Main Board */}
                             <div className="flex-1 relative w-full h-full overflow-hidden">
-                              <GameBoard categories={gameState.categories} onSelectQuestion={handleSelectQuestion} />
+                              <GameBoard categories={gameState.categories} onSelectQuestion={handleSelectQuestion} viewSettings={gameState.viewSettings} />
                             </div>
                           </div>
                           
@@ -693,7 +707,8 @@ const App: React.FC = () => {
                                 onAddPlayer={handleAddPlayer} 
                                 onUpdateScore={handleUpdateScore} 
                                 onSelectPlayer={handleSelectPlayer}
-                                gameActive={gameState.isGameStarted} 
+                                gameActive={gameState.isGameStarted}
+                                viewSettings={gameState.viewSettings}
                             />
                           </div>
                         </div>
