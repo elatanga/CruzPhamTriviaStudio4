@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Plus, Minus } from 'lucide-react';
 import { Player, BoardViewSettings } from '../types';
@@ -21,8 +22,7 @@ export const Scoreboard: React.FC<Props> = ({
   const fontScale = viewSettings?.boardFontScale || 1.0;
   const scoreboardScale = viewSettings?.scoreboardScale || 1.0;
 
-  const handleAdd = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddManual = () => {
     if (newName.trim()) {
       soundService.playClick();
       onAddPlayer(newName.trim());
@@ -63,7 +63,6 @@ export const Scoreboard: React.FC<Props> = ({
               style={{ minHeight: `calc(4.5rem * var(--scoreboard-scale))` }}
             >
               <div className="flex justify-between items-center">
-                {/* Updated: Player Name uses Roboto Bold and responsive clamp sizing */}
                 <span 
                   className={`truncate pr-2 font-roboto font-bold tracking-wide ${isSelected ? 'text-white' : 'text-zinc-400'}`} 
                   style={{ fontSize: `calc(clamp(16px, 1.6vw, 30px) * var(--scoreboard-scale))` }}
@@ -75,15 +74,16 @@ export const Scoreboard: React.FC<Props> = ({
                 </span>
               </div>
               
-              {/* Quick Actions */}
               <div className="flex gap-2 h-8" style={{ height: `calc(2rem * var(--scoreboard-scale))` }}>
                  <button 
+                   type="button"
                    onClick={(e) => { e.stopPropagation(); soundService.playClick(); onUpdateScore(p.id, -100); }} 
                    className="flex-1 bg-zinc-950/80 border border-zinc-800 text-red-500 hover:border-red-500 hover:bg-red-900/20 rounded flex items-center justify-center transition-colors"
                  >
                    <Minus className="w-4 h-4" />
                  </button>
                  <button 
+                   type="button"
                    onClick={(e) => { e.stopPropagation(); soundService.playClick(); onUpdateScore(p.id, 100); }} 
                    className="flex-1 bg-zinc-950/80 border border-zinc-800 text-green-500 hover:border-green-500 hover:bg-green-900/20 rounded flex items-center justify-center transition-colors"
                  >
@@ -98,19 +98,20 @@ export const Scoreboard: React.FC<Props> = ({
         {players.length === 0 && <div className="text-center text-zinc-700 text-[10px] py-4 italic uppercase tracking-wider">No Contestants</div>}
       </div>
 
-      {/* Add Player Form */}
-      <form onSubmit={handleAdd} className="flex-none p-3 border-t border-gold-900/30 bg-zinc-900/50">
+      {/* Add Player Form - Hardened: Div instead of Form to block browser validation tooltips */}
+      <div className="flex-none p-3 border-t border-gold-900/30 bg-zinc-900/50">
         <div className="flex gap-2 h-10">
           <input 
             type="text" 
             value={newName} 
             onChange={(e) => setNewName(e.target.value)} 
+            onKeyDown={(e) => { if(e.key === 'Enter') { e.preventDefault(); handleAddManual(); } }}
             placeholder="ADD NAME" 
             className="flex-1 bg-black border border-zinc-800 rounded px-3 text-xs text-white focus:border-gold-500 outline-none uppercase tracking-wide placeholder:text-zinc-700" 
           />
-          <button type="submit" className="bg-gold-600 hover:bg-gold-500 text-black px-4 rounded transition-colors flex items-center justify-center"><Plus className="w-5 h-5" /></button>
+          <button type="button" onClick={handleAddManual} className="bg-gold-600 hover:bg-gold-500 text-black px-4 rounded transition-colors flex items-center justify-center"><Plus className="w-5 h-5" /></button>
         </div>
-      </form>
+      </div>
     </div>
   );
 };
