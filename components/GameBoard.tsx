@@ -39,10 +39,10 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
         {categories.map((cat) => (
           <div 
             key={cat.id} 
-            className="bg-navy-900 flex items-center justify-center p-2 rounded shadow-lg border-b-2 border-white/10 text-center relative overflow-hidden group min-h-0"
+            className="bg-navy-900 flex items-center justify-center p-3 rounded shadow-lg border-b-2 border-white/20 text-center relative overflow-hidden group min-h-0"
           >
              <h3 
-                className="text-white uppercase leading-none break-words line-clamp-2 w-full tracking-wide" 
+                className="text-white uppercase leading-none break-words line-clamp-2 w-full tracking-wide font-black" 
                 style={{ fontSize: `clamp(14px, calc(1.8vw * var(--board-font-scale)), 44px)` }} 
              >
                {cat.title}
@@ -86,7 +86,7 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
                      <span className="font-mono font-bold text-zinc-700 opacity-50" style={{ fontSize: `clamp(12px, calc(1.5vw * var(--board-font-scale)), 32px)` }}>---</span> 
                    ) : (
                      <span 
-                        className="group-hover:scale-110 transition-transform shadow-black drop-shadow-lg"
+                        className="group-hover:scale-110 transition-transform shadow-black drop-shadow-lg font-black"
                         style={{ fontSize: `clamp(18px, calc(3vw * var(--board-font-scale)), 72px)` }}
                      >
                        {q.points}

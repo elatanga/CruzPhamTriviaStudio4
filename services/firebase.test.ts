@@ -7,6 +7,8 @@ declare const test: any;
 declare const expect: any;
 declare const beforeEach: any;
 declare const afterAll: any;
+// Fix: Declare require for Jest module isolation tests
+declare const require: any;
 
 // Mock Logger to prevent noise during test execution
 jest.mock('./logger', () => ({
@@ -50,6 +52,7 @@ describe('SYSTEM: Configuration & Initialization', () => {
 
   test('FAIL: Reports error when Runtime Config is missing', () => {
     jest.isolateModules(() => {
+      // Fix: require usage in isolated test
       const { firebaseConfigError, missingKeys } = require('./firebase');
       expect(firebaseConfigError).toBe(true);
       expect(missingKeys).toContain('REACT_APP_FIREBASE_API_KEY');
@@ -65,6 +68,7 @@ describe('SYSTEM: Configuration & Initialization', () => {
     };
 
     jest.isolateModules(() => {
+      // Fix: require usage in isolated test
       const { firebaseConfigError, missingKeys } = require('./firebase');
       expect(firebaseConfigError).toBe(true);
       expect(missingKeys).toContain('REACT_APP_FIREBASE_API_KEY');
@@ -82,6 +86,7 @@ describe('SYSTEM: Configuration & Initialization', () => {
     };
 
     jest.isolateModules(() => {
+      // Fix: require usage in isolated test
       const { firebaseConfigError, app, projectId } = require('./firebase');
       
       if (firebaseConfigError) {

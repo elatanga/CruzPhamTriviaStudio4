@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Maximize2 } from 'lucide-react';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout } from 'lucide-react';
 import { GameState, Question, Difficulty, Category, BoardViewSettings } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
@@ -238,7 +238,7 @@ export const DirectorPanel: React.FC<Props> = ({
         {activeTab === 'BOARD' && (
           <div className="space-y-6">
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               {/* Timer Control Panel */}
               <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -269,38 +269,58 @@ export const DirectorPanel: React.FC<Props> = ({
               </div>
 
               {/* View/Scale Control Panel */}
-              <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex flex-col gap-3">
+              <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex flex-col gap-4">
                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                       <Type className="w-4 h-4 text-gold-500" />
-                       <span className="text-xs font-bold uppercase text-zinc-400">Board View Settings</span>
+                       <Layout className="w-4 h-4 text-gold-500" />
+                       <span className="text-xs font-bold uppercase text-zinc-400 tracking-wider">Board View settings</span>
                     </div>
                  </div>
-                 <div className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Board Font Size</label>
+                 
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Font Scale */}
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Type className="w-3 h-3" /> Board Font</label>
                        <div className="flex bg-black p-1 rounded gap-1 border border-zinc-800">
-                          { [0.85, 1.0, 1.15, 1.35].map((scale, i) => (
+                          { [0.85, 1.0, 1.15, 1.25, 1.35].map((scale, i) => (
                              <button 
                                 key={scale} 
                                 onClick={() => updateViewSettings({ boardFontScale: scale })}
-                                className={`px-2 py-1 text-[10px] font-bold rounded ${gameState.viewSettings?.boardFontScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
+                                className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.boardFontScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
                              >
-                                {['XS', 'S', 'M', 'L'][i]}
+                                {['XS', 'S', 'M', 'L', 'XL'][i]}
                              </button>
                           ))}
                        </div>
                     </div>
-                    <div className="flex items-center justify-between">
-                       <label className="text-[10px] font-bold text-zinc-500 uppercase">Tile Padding</label>
+
+                    {/* Tile Scale */}
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Grid className="w-3 h-3" /> Tile Size</label>
                        <div className="flex bg-black p-1 rounded gap-1 border border-zinc-800">
                           { [0.85, 1.0, 1.15].map((scale, i) => (
                              <button 
                                 key={scale} 
                                 onClick={() => updateViewSettings({ tileScale: scale })}
-                                className={`px-2 py-1 text-[10px] font-bold rounded ${gameState.viewSettings?.tileScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
+                                className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.tileScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
                              >
                                 {['Compact', 'Default', 'Large'][i]}
+                             </button>
+                          ))}
+                       </div>
+                    </div>
+
+                    {/* Scoreboard Scale */}
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Users className="w-3 h-3" /> Scoreboard</label>
+                       <div className="flex bg-black p-1 rounded gap-1 border border-zinc-800">
+                          { [0.9, 1.0, 1.2, 1.4].map((scale, i) => (
+                             <button 
+                                key={scale} 
+                                onClick={() => updateViewSettings({ scoreboardScale: scale })}
+                                className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.scoreboardScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
+                             >
+                                {['XS', 'Default', 'Large', 'XL'][i]}
                              </button>
                           ))}
                        </div>
@@ -346,7 +366,7 @@ export const DirectorPanel: React.FC<Props> = ({
                         {q.isVoided && <span className="text-red-500 font-bold">VOID</span>}
                         {q.isDoubleOrNothing && <span className="text-gold-500 font-bold">2x</span>}
                       </div>
-                      <p className="text-xs text-zinc-300 line-clamp-2 leading-tight">{q.text}</p>
+                      <p className="text-xs text-zinc-300 line-clamp-2 leading-tight font-bold">{q.text}</p>
                       <p className="text-[10px] text-zinc-500 truncate">{q.answer}</p>
                     </div>
                   ))}
@@ -418,7 +438,7 @@ export const DirectorPanel: React.FC<Props> = ({
                <input 
                  value={gameState.showTitle}
                  onChange={e => handleUpdateTitle(e.target.value)}
-                 className="w-full bg-black border border-zinc-800 p-3 rounded text-white focus:border-gold-500 outline-none"
+                 className="w-full bg-black border border-zinc-800 p-3 rounded text-white focus:border-gold-500 outline-none font-bold"
                />
              </div>
              <div className="p-4 bg-zinc-900 rounded border border-zinc-800 text-xs text-zinc-400">
@@ -454,7 +474,7 @@ export const DirectorPanel: React.FC<Props> = ({
                   <textarea 
                     id="dir-q-text"
                     defaultValue={q.text}
-                    className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-24 focus:border-gold-500 outline-none"
+                    className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-24 focus:border-gold-500 outline-none font-bold"
                   />
                 </div>
                 <div>
@@ -462,7 +482,7 @@ export const DirectorPanel: React.FC<Props> = ({
                   <textarea 
                     id="dir-q-answer"
                     defaultValue={q.answer}
-                    className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-16 focus:border-gold-500 outline-none"
+                    className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-16 focus:border-gold-500 outline-none font-bold"
                   />
                 </div>
                 

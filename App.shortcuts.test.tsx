@@ -77,16 +77,14 @@ describe('CRUZPHAM TRIVIA - Shortcuts & Styling Tests', () => {
     
     await waitFor(() => screen.getByText(/Template Library/i));
     
-    // Create Template (Simulate clicks)
-    fireEvent.click(screen.getByText(/New Template/i));
-    await waitFor(() => screen.getByPlaceholderText(/e.g. Science Night 2024/i));
+    // Create Template
+    fireEvent.click(screen.getByText(/Create Template/i));
+    await waitFor(() => screen.getByText(/New Template Configuration/i));
     
-    // Fill Config
     const templateTitle = screen.getByPlaceholderText(/e.g. Science Night 2024/i);
     fireEvent.change(templateTitle, { target: { value: 'Test Template' } });
     
-    // Click "Create Template" (initializes board)
-    fireEvent.click(screen.getByText('Create Template', { selector: 'button' }));
+    fireEvent.click(screen.getByText('Start Building'));
     
     // Save
     await waitFor(() => screen.getByText(/Save/i));
@@ -106,50 +104,63 @@ describe('CRUZPHAM TRIVIA - Shortcuts & Styling Tests', () => {
 
     // Switch to Director
     fireEvent.click(screen.getByText(/Director/i, { selector: 'button' }));
-    await waitFor(() => screen.getByText(/Board View Settings/i));
+    await waitFor(() => screen.getByText(/Board View settings/i));
 
     // Change Font Scale to XL (Scale 1.35)
-    const scaleL = screen.getByText('L');
-    fireEvent.click(scaleL);
+    const scaleXL = screen.getByText('XL');
+    fireEvent.click(scaleXL);
 
     // Switch back to Board
     fireEvent.click(screen.getByText(/Board/i, { selector: 'button' }));
     
     // Verify CSS variables on GameBoard container
-    const boardContainer = screen.getByText('Test Template').parentElement?.parentElement?.querySelector('.font-roboto');
+    const boardContainer = document.querySelector('.font-roboto');
     expect(boardContainer).toHaveStyle('--board-font-scale: 1.35');
   });
 
-  test('2) Roboto Font: Ensure font-roboto class is applied to board', async () => {
+  test('2) Reveal Answer Styling: Roboto font and full-screen classes applied', async () => {
     await setupAuthenticatedApp();
     await createAndPlayShow();
 
-    const board = screen.getByText('Test Template').closest('div');
-    expect(board).toHaveClass('font-roboto');
-    expect(board).toHaveClass('font-bold');
+    // Open a question
+    const qBtn = screen.getAllByText('100')[0];
+    fireEvent.click(qBtn);
+    
+    await waitFor(() => screen.getByText(/Reveal Answer/i));
+    
+    const modalRoot = screen.getByText(/Reveal Answer/i).closest('.fixed');
+    expect(modalRoot).toHaveClass('font-roboto');
+    expect(modalRoot).toHaveClass('font-bold');
+    expect(modalRoot).toHaveClass('inset-0');
   });
 
-  test('3) Arrow Shortcuts: Player Selection & Focus Guards', async () => {
+  test('3) Reveal Answer Logic: Buttons locked until reveal', async () => {
+    await setupAuthenticatedApp();
+    await createAndPlayShow();
+
+    // Open a question
+    const qBtn = screen.getAllByText('100')[0];
+    fireEvent.click(qBtn);
+    
+    await waitFor(() => screen.getByText(/Reveal Answer/i));
+    
+    // Buttons should NOT be visible yet (only Reveal Answer button is shown initially in current UI structure)
+    expect(screen.queryByText(/Award/i)).not.toBeInTheDocument();
+    
+    // Space to reveal
+    fireEvent.keyDown(window, { code: 'Space' });
+    
+    // Buttons should now be visible
+    await waitFor(() => screen.getByText(/Award \(ENTER\)/i));
+    expect(screen.getByText(/Award \(ENTER\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Steal \(S\)/i)).toBeInTheDocument();
+  });
+
+  test('4) Arrow Shortcuts: Player Selection works', async () => {
     await setupAuthenticatedApp();
     await createAndPlayShow();
 
     fireEvent.keyDown(window, { code: 'ArrowDown', key: 'ArrowDown' });
     expect(soundService.playSelect).toHaveBeenCalled();
-  });
-
-  test('4) Void Flow: Logic & UI Updates', async () => {
-    await setupAuthenticatedApp();
-    await createAndPlayShow();
-
-    const qBtn = screen.getAllByText('100')[0];
-    fireEvent.click(qBtn);
-    
-    await waitFor(() => screen.getByText(/Reveal Answer/i));
-    fireEvent.click(screen.getByText(/Reveal Answer/i));
-    
-    await waitFor(() => screen.getByText(/Void \(ESC\)/i));
-    fireEvent.click(screen.getByText(/Void \(ESC\)/i));
-    
-    await waitFor(() => expect(screen.queryByText(/VOID/i)).toBeInTheDocument());
   });
 });

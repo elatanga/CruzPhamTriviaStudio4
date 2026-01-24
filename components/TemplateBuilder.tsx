@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2, HelpCircle, AlertCircle } from 'lucide-react';
 import { GameTemplate, Category, Question, Difficulty } from '../types';
@@ -338,9 +337,12 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                     <div className="flex flex-col">
                         <label className="text-xs text-zinc-300">Point Scale</label>
                         <span className="text-[10px] text-zinc-600">Increment per row</span>
+                        <span className="text-[9px] text-gold-500 font-mono mt-0.5">
+                           Range: {config.pointScale} - {config.pointScale * config.rowCount}
+                        </span>
                     </div>
                     <div className="flex items-center gap-1 bg-black p-1 rounded border border-zinc-800">
-                        {[10, 20, 25, 100].map(val => (
+                        {[10, 20, 25, 50, 100].map(val => (
                             <button
                                 key={val}
                                 disabled={isLocked}

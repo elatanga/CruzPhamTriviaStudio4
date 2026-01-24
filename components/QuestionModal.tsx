@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Check, ShieldAlert, Monitor, ArrowLeft, Trash2, Trophy, Clock } from 'lucide-react';
 import { Question, Player, GameTimer } from '../types';
@@ -58,7 +57,7 @@ export const QuestionModal: React.FC<Props> = ({
     interval = window.setInterval(updateTimer, 200);
 
     return () => clearInterval(interval);
-  }, [timer]);
+  }, [timer, timeLeft]);
 
   // Sound effects on mount/update
   useEffect(() => {
@@ -66,7 +65,10 @@ export const QuestionModal: React.FC<Props> = ({
   }, [isDouble, isRevealed]);
 
   const handleAction = useCallback((action: 'reveal' | 'award' | 'steal' | 'void' | 'return') => {
-    if (showStealSelect && action !== 'return') return; // Block keys if steal menu open
+    // LOCK RULE: Before reveal, only 'reveal' is allowed.
+    if (!isRevealed && action !== 'reveal') return;
+    
+    if (showStealSelect && action !== 'return') return; // Block other keys if steal menu open
 
     switch (action) {
       case 'reveal':
@@ -140,138 +142,167 @@ export const QuestionModal: React.FC<Props> = ({
   }, [handleAction]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl animate-in fade-in zoom-in duration-200">
-      
-      {/* Background Glow based on state */}
-      <div className={`absolute inset-0 opacity-20 transition-colors duration-500 ${isRevealed ? (isDouble ? 'bg-red-900' : 'bg-gold-900') : 'bg-blue-900'}`} />
+    <div 
+      data-testid="question-modal-root"
+      className="fixed inset-0 z-50 flex flex-col bg-black text-white font-sans overflow-hidden animate-in fade-in duration-200"
+      style={{ padding: 'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)' }}
+    >
+      {/* Background Glow */}
+      <div className={`absolute inset-0 opacity-20 transition-colors duration-500 pointer-events-none ${isRevealed ? (isDouble ? 'bg-red-900' : 'bg-gold-900') : 'bg-blue-900'}`} />
 
-      <div className="relative w-full max-w-5xl h-[80vh] flex flex-col border-2 border-gold-600/50 rounded-2xl shadow-[0_0_100px_-20px_rgba(255,215,0,0.3)] bg-black overflow-hidden">
-        
-        {/* HEADER */}
-        <div className="flex-none bg-gold-600 p-3 flex justify-between items-center text-black">
-          <h3 className="font-black uppercase tracking-widest text-lg md:text-xl">
-            {categoryTitle} // {isDouble ? <span className="animate-pulse font-serif text-red-900">DOUBLE</span> : <span>{question.points} PTS</span>}
+      {/* TOP: Category + Points */}
+      <div className="flex-none h-16 md:h-20 bg-gold-600 px-6 flex justify-between items-center text-black z-10 shadow-xl">
+        <div className="flex flex-col">
+          <span className="text-[10px] md:text-xs uppercase tracking-widest opacity-80 font-bold">Category</span>
+          <h3 className="font-black uppercase tracking-widest text-lg md:text-2xl truncate max-w-md">
+            {categoryTitle}
           </h3>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase">
-            {activePlayer ? <span>Active: {activePlayer.name}</span> : <span>No Player Selected</span>}
-          </div>
         </div>
-
-        {/* CONTENT */}
-        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 md:p-16 relative">
-          
-          {/* Double Or Nothing Banner */}
+        
+        <div className="flex items-center gap-6">
           {isDouble && (
-            <div className="absolute top-0 left-0 right-0 flex justify-center py-4 z-20 animate-in slide-in-from-top duration-500">
-              <h1 className="text-red-600 font-black text-3xl md:text-5xl uppercase tracking-widest drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] stroke-black" style={{ textShadow: '0 0 20px rgba(220, 38, 38, 0.5)' }}>
-                DOUBLE OR NOTHING
-              </h1>
+            <div className="bg-red-700 text-white px-4 py-1 rounded-full animate-pulse border-2 border-red-900">
+               <span className="text-xs md:text-sm font-black tracking-tighter">DOUBLE OR NOTHING</span>
             </div>
           )}
+          <div className="text-right">
+            <span className="text-[10px] md:text-xs uppercase tracking-widest opacity-80 font-bold">Points</span>
+            <div className="text-xl md:text-3xl font-black">{question.points}</div>
+          </div>
+        </div>
+      </div>
 
-          {/* TIMER DISPLAY */}
-          {timeLeft !== null && (
-             <div className={`absolute top-16 right-4 md:right-8 p-3 rounded-full border-2 font-mono text-xl md:text-2xl font-black flex items-center justify-center w-16 h-16 transition-colors duration-300 ${timeLeft <= 5 ? 'bg-red-900 border-red-500 text-white animate-pulse' : 'bg-black/50 border-gold-500 text-gold-500'}`}>
-               {timeLeft}
-             </div>
-          )}
+      {/* CENTER: Question + Answer */}
+      <div className="flex-1 flex flex-col items-center justify-center text-center p-8 md:p-12 relative z-10">
+        
+        {/* TIMER OVERLAY (Floating Top Right) */}
+        {timeLeft !== null && (
+           <div className={`absolute top-4 right-4 md:top-8 md:right-8 p-3 rounded-full border-4 font-mono text-2xl md:text-4xl font-black flex items-center justify-center w-20 h-20 md:w-28 md:h-28 transition-colors duration-300 bg-black/80 ${timeLeft <= 5 ? 'border-red-500 text-red-500 animate-pulse' : 'border-gold-500 text-gold-500'}`}>
+             {timeLeft}
+           </div>
+        )}
 
-          {/* Question Text */}
-          <h2 className={`font-serif text-3xl md:text-5xl lg:text-6xl text-white leading-tight mb-16 transition-all duration-500 ${isRevealed ? 'scale-75 opacity-60' : 'scale-100'} ${isDouble ? 'mt-12' : ''}`}>
+        {/* Question Text - Extra large and readable for livestream */}
+        <div className="max-w-7xl w-full mb-6 md:mb-10">
+          <h2 
+            data-testid="question-text"
+            className={`leading-[1.15] transition-all duration-500 font-roboto font-bold px-4 ${isRevealed ? 'scale-90 opacity-40' : 'scale-100'}`}
+            style={{ fontSize: 'clamp(34px, 4.8vw, 96px)' }}
+          >
             {question.text}
           </h2>
+        </div>
 
-          {/* Answer Reveal */}
+        {/* Answer Reveal - Large readable font */}
+        <div className="w-full max-w-5xl h-40 md:h-56 flex items-center justify-center">
           {isRevealed ? (
-            <div className="animate-in zoom-in slide-in-from-bottom duration-300 bg-gold-900/40 border-2 border-gold-500 px-12 py-8 rounded-xl backdrop-blur-md shadow-[0_0_50px_rgba(255,215,0,0.2)]">
-              <p className="text-3xl md:text-5xl font-bold text-gold-400 drop-shadow-md">{question.answer}</p>
+            <div className="animate-in zoom-in slide-in-from-bottom duration-300 bg-gold-950/50 border-4 border-gold-500 px-10 md:px-20 py-6 md:py-10 rounded-2xl backdrop-blur-md shadow-[0_0_80px_rgba(255,215,0,0.3)]">
+              <p 
+                data-testid="answer-text"
+                className="text-gold-400 drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)] leading-tight font-roboto font-bold"
+                style={{ fontSize: 'clamp(28px, 4vw, 80px)' }}
+              >
+                {question.answer}
+              </p>
             </div>
           ) : (
-            <div className="h-24 flex items-center justify-center text-zinc-600 italic font-serif text-xl border-2 border-dashed border-zinc-800 rounded-xl px-12">
-              Answer Hidden
-            </div>
-          )}
-
-          {/* Steal Selector Overlay */}
-          {showStealSelect && (
-            <div className="absolute inset-0 bg-black/90 z-20 flex flex-col items-center justify-center animate-in fade-in duration-200">
-              <h3 className="text-purple-500 font-bold text-2xl mb-6 uppercase tracking-widest">Select Player to Steal</h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full max-w-2xl px-4">
-                {players.filter(p => p.id !== selectedPlayerId).map(p => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => onClose('steal', p.id)}
-                    className="bg-zinc-900 border border-zinc-700 hover:border-purple-500 hover:bg-purple-900/20 p-6 rounded text-xl font-bold text-white transition-all"
-                  >
-                    {p.name}
-                  </button>
-                ))}
-                <button type="button" onClick={() => setShowStealSelect(false)} className="col-span-full mt-4 text-zinc-500 hover:text-white uppercase text-sm">Cancel Steal</button>
-              </div>
+            <div className="flex flex-col items-center gap-4 text-zinc-700">
+               <Monitor className="w-16 h-16 md:w-20 md:h-20 opacity-20" />
+               <span className="text-xl md:text-2xl italic opacity-30 font-serif tracking-widest uppercase">Waiting for host...</span>
             </div>
           )}
         </div>
 
-        {/* CONTROLS FOOTER - VISUALLY SHOW STATE */}
-        <div className="flex-none bg-zinc-950 border-t border-zinc-800 p-6">
-          <div className="flex justify-center gap-4 md:gap-8">
-            
-            {/* Reveal Button (Only Active Phase 1) */}
-            {!isRevealed ? (
+        {/* Steal Selector Overlay */}
+        {showStealSelect && (
+          <div className="absolute inset-0 bg-black/95 z-30 flex flex-col items-center justify-center animate-in fade-in duration-200">
+            <h3 className="text-purple-500 font-black text-3xl md:text-5xl mb-12 uppercase tracking-widest">Select Player to Steal</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-6 w-full max-w-4xl px-8">
+              {players.filter(p => p.id !== selectedPlayerId).map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onClose('steal', p.id)}
+                  className="bg-zinc-900 border-4 border-zinc-800 hover:border-purple-500 hover:bg-purple-900/40 p-8 md:p-12 rounded-2xl text-2xl md:text-4xl font-black text-white transition-all transform hover:scale-105 active:scale-95"
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setShowStealSelect(false)} 
+              className="mt-16 text-zinc-500 hover:text-white uppercase text-xl font-black tracking-widest border-b-4 border-transparent hover:border-white transition-all"
+            >
+              Cancel Steal
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* BOTTOM: Action Bar - Always at bottom, never pushing off-screen */}
+      <div className="flex-none bg-zinc-950 border-t-2 border-zinc-800 p-4 md:p-6 z-10">
+        <div className="flex justify-center items-center gap-4 md:gap-8 max-w-7xl mx-auto w-full">
+          
+          {!isRevealed ? (
+            <button 
+              type="button"
+              onClick={() => handleAction('reveal')}
+              className="bg-gold-600 hover:bg-gold-500 text-black font-black text-2xl md:text-4xl px-12 md:px-20 py-4 md:py-6 rounded-2xl shadow-2xl uppercase tracking-tighter flex items-center gap-4 transition-transform active:scale-95 group"
+            >
+              <Monitor className="w-6 h-6 md:w-10 md:h-10 group-hover:animate-pulse" /> 
+              Reveal Answer
+              <span className="text-[10px] md:text-xs bg-black/20 px-2 py-1 rounded ml-4 font-mono">SPACE</span>
+            </button>
+          ) : (
+            <div data-testid="action-buttons-container" className="flex flex-wrap justify-center gap-4 md:gap-6 animate-in slide-in-from-bottom-4 duration-300">
               <button 
                 type="button"
-                onClick={() => handleAction('reveal')}
-                className="bg-gold-600 hover:bg-gold-500 text-black font-black text-xl px-12 py-4 rounded-lg shadow-lg uppercase tracking-wider flex items-center gap-3 transition-transform active:scale-95"
+                onClick={() => handleAction('return')}
+                className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-blue-400 transition-all px-4 py-2 rounded-xl hover:bg-blue-900/10 border-2 border-transparent hover:border-blue-900/30"
               >
-                <Monitor className="w-6 h-6" /> Reveal Answer <span className="text-[10px] bg-black/20 px-2 py-0.5 rounded ml-2">SPACE</span>
+                <div className="p-3 bg-zinc-900 rounded-full mb-1 shadow-lg"><ArrowLeft className="w-5 h-5 md:w-6 md:h-6" /></div>
+                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Return (BKSP)</span>
               </button>
-            ) : (
-              // Phase 2 Buttons
-              <>
-                <button 
-                  type="button"
-                  onClick={() => handleAction('return')}
-                  className="flex flex-col items-center gap-1 text-zinc-500 hover:text-blue-400 transition-colors px-4"
-                >
-                  <div className="p-3 bg-zinc-900 rounded-full mb-1"><ArrowLeft className="w-5 h-5" /></div>
-                  <span className="text-[10px] font-bold uppercase">Return (BKSP)</span>
-                </button>
 
-                <button 
-                  type="button"
-                  onClick={() => handleAction('void')}
-                  className="flex flex-col items-center gap-1 text-zinc-500 hover:text-red-500 transition-colors px-4"
-                >
-                  <div className="p-3 bg-zinc-900 rounded-full mb-1"><Trash2 className="w-5 h-5" /></div>
-                  <span className="text-[10px] font-bold uppercase">Void (ESC)</span>
-                </button>
+              <button 
+                type="button"
+                onClick={() => handleAction('void')}
+                className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-red-500 transition-all px-4 py-2 rounded-xl hover:bg-red-900/10 border-2 border-transparent hover:border-red-900/30"
+              >
+                <div className="p-3 bg-zinc-900 rounded-full mb-1 shadow-lg"><Trash2 className="w-5 h-5 md:w-6 md:h-6" /></div>
+                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Void (ESC)</span>
+              </button>
 
-                <div className="w-px h-12 bg-zinc-800 mx-2" />
+              <div className="w-px h-12 md:h-16 bg-zinc-800 self-center hidden sm:block" />
 
-                <button 
-                  type="button"
-                  onClick={() => handleAction('steal')}
-                  className="flex flex-col items-center gap-1 text-purple-500 hover:text-purple-300 transition-colors px-4 group"
-                >
-                  <div className="p-3 bg-purple-900/20 border border-purple-900 group-hover:bg-purple-600 group-hover:text-black group-hover:border-purple-500 rounded-full mb-1 transition-all"><ShieldAlert className="w-6 h-6" /></div>
-                  <span className="text-[10px] font-bold uppercase">Steal (S)</span>
-                </button>
+              <button 
+                type="button"
+                onClick={() => handleAction('steal')}
+                className="flex flex-col items-center justify-center gap-1 text-purple-500 hover:text-purple-300 transition-all px-4 py-2 rounded-xl hover:bg-purple-900/20 border-2 border-transparent hover:border-purple-500/30 group"
+              >
+                <div className="p-3 bg-purple-900/20 border-4 border-purple-900 group-hover:bg-purple-600 group-hover:text-black group-hover:border-purple-500 rounded-full mb-1 shadow-2xl transition-all scale-110"><ShieldAlert className="w-6 h-6 md:w-8 md:h-8" /></div>
+                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Steal (S)</span>
+              </button>
 
-                <button 
-                  type="button"
-                  onClick={() => handleAction('award')}
-                  disabled={!selectedPlayerId}
-                  className="flex flex-col items-center gap-1 text-green-500 hover:text-green-300 transition-colors px-4 group disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <div className="p-3 bg-green-900/20 border border-green-900 group-hover:bg-green-600 group-hover:text-black group-hover:border-green-500 rounded-full mb-1 transition-all"><Trophy className="w-6 h-6" /></div>
-                  <span className="text-[10px] font-bold uppercase">Award (ENTER)</span>
-                </button>
-              </>
-            )}
+              <button 
+                type="button"
+                onClick={() => handleAction('award')}
+                disabled={!selectedPlayerId}
+                className="flex flex-col items-center justify-center gap-1 text-green-500 hover:text-green-300 transition-all px-4 py-2 rounded-xl hover:bg-green-900/20 border-2 border-transparent hover:border-green-500/30 group disabled:opacity-30 disabled:grayscale disabled:pointer-events-none"
+              >
+                <div className="p-3 bg-green-900/20 border-4 border-green-900 group-hover:bg-green-600 group-hover:text-black group-hover:border-green-500 rounded-full mb-1 shadow-2xl transition-all scale-110"><Trophy className="w-6 h-6 md:w-8 md:h-8" /></div>
+                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Award (ENTER)</span>
+              </button>
+            </div>
+          )}
 
-          </div>
         </div>
+      </div>
+
+      {/* Producer Info Tag */}
+      <div className="absolute bottom-1 right-2 text-[8px] font-mono text-zinc-700 uppercase tracking-widest pointer-events-none z-20">
+         Active Producer: {activePlayer ? activePlayer.name : 'None'}
       </div>
     </div>
   );

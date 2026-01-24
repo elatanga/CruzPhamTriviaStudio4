@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { logger } from '../services/logger';
 
 interface Props {
@@ -10,6 +11,11 @@ interface State {
   error: Error | null;
 }
 
+/**
+ * ErrorBoundary component to catch and handle uncaught errors in the React component tree.
+ * Explicitly extends React.Component to ensure correctly typed access to this.setState and this.props.
+ */
+// Fix: Explicitly extending React.Component to resolve TypeScript errors with setState and props
 export class ErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
@@ -17,20 +23,25 @@ export class ErrorBoundary extends React.Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
+    // Update state so the next render shows the fallback UI.
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // Log the error to our internal logger for auditing and debugging.
     logger.error('Uncaught error in component tree', { error, errorInfo });
   }
 
   public handleReset = () => {
+    // Resetting error state and performing a hard reload to attempt recovery.
+    // Fix: Using this.setState on React.Component to ensure typed access
     this.setState({ hasError: false, error: null });
     window.location.reload();
   };
 
   public render() {
     if (this.state.hasError) {
+      // Render fallback studio failure UI.
       return (
         <div className="h-screen w-screen flex flex-col items-center justify-center bg-black text-gold-500 p-8 text-center font-sans">
           <div className="border border-gold-500/50 p-12 bg-gray-900/80 backdrop-blur-md rounded-lg max-w-lg shadow-2xl shadow-gold-500/10">
@@ -57,6 +68,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       );
     }
 
+    // Fix: Accessing this.props on React.Component explicitly
     return this.props.children;
   }
 }

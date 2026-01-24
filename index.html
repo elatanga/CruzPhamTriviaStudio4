@@ -30,7 +30,7 @@
             fontFamily: {
               serif: ['Playfair Display', 'serif'],
               sans: ['Inter', 'sans-serif'],
-              roboto: ['Roboto', 'sans-serif'],
+              roboto: ['Roboto', 'system-ui', 'sans-serif'],
             }
           }
         }
@@ -43,6 +43,11 @@
         background-color: #000000;
         color: #FFD700;
         overflow: hidden; /* Enforce one screen */
+      }
+      /* Reusable Roboto Bold class as requested */
+      .font-roboto-bold {
+        font-family: "Roboto", system-ui, sans-serif;
+        font-weight: 700;
       }
       /* Custom Scrollbar for internal content if strictly needed on tiny screens */
       ::-webkit-scrollbar {
@@ -71,7 +76,8 @@
     "path": "https://esm.sh/path@^0.12.7",
     "vite": "https://esm.sh/vite@^7.3.1",
     "firebase/": "https://esm.sh/firebase@^12.8.0/",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "url": "https://esm.sh/url@^0.11.4"
   }
 }
 </script>

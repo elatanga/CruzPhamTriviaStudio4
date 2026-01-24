@@ -1,3 +1,4 @@
+
 export interface Question {
   id: string;
   text: string;
@@ -31,6 +32,7 @@ export interface GameTimer {
 export interface BoardViewSettings {
   boardFontScale: number; // 0.85 - 1.35
   tileScale: number; // 0.85 - 1.15
+  scoreboardScale: number; // 0.9 - 1.4
   updatedAt: string;
 }
 
@@ -184,18 +186,18 @@ export type AuditAction =
   | 'LOGIN' 
   | 'TOKEN_ISSUED' 
   | 'TOKEN_REFRESHED' 
-  | 'TOKEN_REVOKED'
-  | 'ACCESS_GRANTED'
-  | 'ACCESS_REVOKED'
-  | 'USER_CREATED'
-  | 'USER_UPDATED'
-  | 'USER_DELETED'
-  | 'ADMIN_CREATED'
+  | 'TOKEN_REVOKED' 
+  | 'ACCESS_GRANTED' 
+  | 'ACCESS_REVOKED' 
+  | 'USER_CREATED' 
+  | 'USER_UPDATED' 
+  | 'USER_DELETED' 
+  | 'ADMIN_CREATED' 
   | 'MESSAGE_SENT_EMAIL' 
-  | 'MESSAGE_SENT_SMS'
-  | 'REQUEST_APPROVED'
-  | 'REQUEST_REJECTED'
-  | 'REQUEST_SUBMITTED'
+  | 'MESSAGE_SENT_SMS' 
+  | 'REQUEST_APPROVED' 
+  | 'REQUEST_REJECTED' 
+  | 'REQUEST_SUBMITTED' 
   | 'ADMIN_NOTIFIED';
 
 export interface AuditLogEntry {

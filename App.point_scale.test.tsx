@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import App from './App';
@@ -83,31 +82,31 @@ describe('CRUZPHAM TRIVIA - Point Scale Tests', () => {
     fireEvent.click(screen.getByText('25', { selector: 'button' }));
     expect(screen.getByText(/Range: 25 - 125/i)).toBeInTheDocument();
 
-    // 1c. Test Row Constraint (Max 10)
-    // Click '+' on Rows until max
-    const rowPlus = screen.getAllByText('', { selector: 'button svg.lucide-plus' })[0].closest('button'); // First plus is Cats or Rows?
-    // Actually, based on layout: Categories is first block, Rows is second.
-    // We can use aria-labels if they existed, or context.
-    // The component has "Rows (1-10)" label, followed by the control div.
+    // 1c. Test Scale = 50
+    fireEvent.click(screen.getByText('50', { selector: 'button' }));
+    expect(screen.getByText(/Range: 50 - 250/i)).toBeInTheDocument();
+
+    // 1d. Test Row Constraint (Max 10)
+    // Click '+' on Rows until max (starting at 5, need 5 more clicks)
+    // Based on TemplateBuilder.tsx order: Categories is first +, Rows is second.
+    const rowPlus = screen.getAllByRole('button').filter(b => b.querySelector('svg.lucide-plus'))[1];
+    for(let i=0; i<5; i++) fireEvent.click(rowPlus);
     
-    // Let's set rows via state manipulation simulation or careful clicks. 
-    // Easier: Just generate board and check.
+    // Verify range updates for 10 rows with 50 increment
+    expect(screen.getByText(/Range: 50 - 500/i)).toBeInTheDocument();
     
     // Set Scale 20
     fireEvent.click(screen.getByText('20', { selector: 'button' }));
     
     // Enter Title
-    fireEvent.change(screen.getByPlaceholderText(/Template Title/i), { target: { value: 'Scale 20 Test' } });
+    fireEvent.change(screen.getByPlaceholderText(/e.g. Science Night 2024/i), { target: { value: 'Scale 20 Test' } });
     
     // Create
-    fireEvent.click(screen.getByText('Create Template', { selector: 'button' }));
+    fireEvent.click(screen.getByText('Start Building', { selector: 'button' }));
     
-    // Check Board Values: 20, 40, 60, 80, 100 (Default 5 rows)
+    // Check Board Values: 20, 40, 60, 80, 100, 120, 140, 160, 180, 200 (10 rows)
     await waitFor(() => screen.getByText('20'));
-    expect(screen.getByText('40')).toBeInTheDocument();
-    expect(screen.getByText('60')).toBeInTheDocument();
-    expect(screen.getByText('80')).toBeInTheDocument();
-    expect(screen.getByText('100')).toBeInTheDocument();
+    expect(screen.getByText('200')).toBeInTheDocument();
   });
 
   test('2) Unit: Backward Compatibility - Legacy Template Defaults', async () => {
@@ -151,8 +150,6 @@ describe('CRUZPHAM TRIVIA - Point Scale Tests', () => {
     // Check Dashboard
     await waitFor(() => screen.getByText('Legacy Game'));
     
-    // Open Editor (Edit button hidden in hover, but we can simulate click if we find it)
-    // Or just Play it. Play uses config.
     fireEvent.click(screen.getByText('Play Show'));
     
     await waitFor(() => screen.getByText(/End Show/i));
@@ -163,130 +160,96 @@ describe('CRUZPHAM TRIVIA - Point Scale Tests', () => {
     expect(screen.getByText('300')).toBeInTheDocument();
   });
 
-  test('3) Integration: Template Creation with Scale 25', async () => {
+  test('3) Integration: Template Creation with Scale 50', async () => {
     await setupAuthenticatedApp();
 
     fireEvent.click(screen.getByText(/New Template/i));
     await waitFor(() => screen.getByText(/Configuration/i));
 
-    fireEvent.change(screen.getByPlaceholderText(/Template Title/i), { target: { value: 'Quarter Scale' } });
-    fireEvent.click(screen.getByText('25', { selector: 'button' }));
+    fireEvent.change(screen.getByPlaceholderText(/e.g. Science Night 2024/i), { target: { value: 'Fifty Scale' } });
+    fireEvent.click(screen.getByText('50', { selector: 'button' }));
     
-    fireEvent.click(screen.getByText('Create Template'));
+    fireEvent.click(screen.getByText('Start Building'));
     
     // Verify Builder View
-    await waitFor(() => screen.getByText('Quarter Scale'));
+    await waitFor(() => screen.getByText('Fifty Scale'));
     
-    // Check first column points
-    expect(screen.getAllByText('25').length).toBeGreaterThan(0);
+    // Check points
     expect(screen.getAllByText('50').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('75').length).toBeGreaterThan(0);
     expect(screen.getAllByText('100').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('125').length).toBeGreaterThan(0);
-    
-    // Verify 150 is NOT present (default 5 rows)
-    expect(screen.queryByText('150')).not.toBeInTheDocument();
+    expect(screen.getAllByText('150').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('200').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('250').length).toBeGreaterThan(0);
 
     // Save
     fireEvent.click(screen.getByText('Save'));
     await waitFor(() => screen.getByText('Template saved successfully.'));
   });
 
-  test('4) Integration: Download/Upload preserves pointScale', async () => {
+  test('4) Integration: Upload preserves pointScale of 50', async () => {
     await setupAuthenticatedApp();
     
-    // 1. Create a scale 10 template
-    const templateWithScale10 = {
-      id: 't-scale-10',
+    const templateWithScale50 = {
+      id: 't-scale-50',
       showId: (JSON.parse(localStorage.getItem('cruzpham_db_shows') || '[]')[0] || {}).id,
-      topic: 'Scale 10 Import',
-      config: { playerCount: 2, categoryCount: 1, rowCount: 2, pointScale: 10 },
+      topic: 'Scale 50 Import',
+      config: { playerCount: 2, categoryCount: 1, rowCount: 2, pointScale: 50 },
       categories: [{
-        id: 'c1', title: 'Math',
+        id: 'c1', title: 'Trivia',
         questions: [
-          { id: 'q1', points: 10, text: '10 pts', answer: 'A', isRevealed: false, isAnswered: false },
-          { id: 'q2', points: 20, text: '20 pts', answer: 'B', isRevealed: false, isAnswered: false }
+          { id: 'q1', points: 50, text: '50 pts', answer: 'A', isRevealed: false, isAnswered: false },
+          { id: 'q2', points: 100, text: '100 pts', answer: 'B', isRevealed: false, isAnswered: false }
         ]
       }],
       createdAt: new Date().toISOString()
     };
 
-    // 2. Simulate Upload (FileReader mock needed or just inject to service)
-    // Because implementing a full FileReader mock in JSDOM is verbose, we will mock the `handleFileChange` effect 
-    // by manually calling dataService.importTemplate
-    
-    const showId = templateWithScale10.showId;
-    // Note: We need a valid show ID. setupAuthenticatedApp created one.
-    // Let's get it from localStorage to be safe.
     const shows = JSON.parse(localStorage.getItem('cruzpham_db_shows') || '[]');
-    templateWithScale10.showId = shows[0].id;
+    templateWithScale50.showId = shows[0].id;
 
-    const fileContent = JSON.stringify(templateWithScale10);
-    
-    // Use the actual UI upload button if possible, but mocking FileReader is tricky.
-    // Let's use the service directly to test the *logic* of import, then verify UI reflects it.
+    const fileContent = JSON.stringify(templateWithScale50);
     
     act(() => {
-      dataService.importTemplate(templateWithScale10.showId, fileContent);
+      dataService.importTemplate(templateWithScale50.showId, fileContent);
     });
 
-    // Force re-render of dashboard by switching shows or just waiting? 
-    // The component loads on mount. We are already mounted. 
-    // We might need to refresh the view. 
-    // Let's create a new show to trigger a fresh dashboard load for simplicity in test flow.
     fireEvent.click(screen.getByText(/Switch Show/i));
     fireEvent.click(screen.getByText(/Scale Test Show/i));
 
-    // Verify template appears
-    await waitFor(() => screen.getByText('Scale 10 Import (Imported)'));
+    await waitFor(() => screen.getByText('Scale 50 Import (Imported)'));
     
-    // Play it
     const playBtns = screen.getAllByText(/Play Show/i);
-    fireEvent.click(playBtns[playBtns.length - 1]); // Click the new one
+    fireEvent.click(playBtns[playBtns.length - 1]);
 
-    // Verify Points
-    await waitFor(() => screen.getByText('10'));
-    expect(screen.getByText('20')).toBeInTheDocument();
+    await waitFor(() => screen.getByText('50'));
+    expect(screen.getByText('100')).toBeInTheDocument();
   });
 
-  test('5) Smoke: Gameplay with Scale 10', async () => {
+  test('5) Smoke: Gameplay with Scale 50', async () => {
     await setupAuthenticatedApp();
     
-    // Create 10-scale template
     fireEvent.click(screen.getByText(/New Template/i));
     await waitFor(() => screen.getByText(/Configuration/i));
-    fireEvent.change(screen.getByPlaceholderText(/Template Title/i), { target: { value: 'Game 10' } });
-    fireEvent.click(screen.getByText('10', { selector: 'button' }));
-    fireEvent.click(screen.getByText('Create Template'));
+    fireEvent.change(screen.getByPlaceholderText(/e.g. Science Night 2024/i), { target: { value: 'Game 50' } });
+    fireEvent.click(screen.getByText('50', { selector: 'button' }));
+    fireEvent.click(screen.getByText('Start Building'));
     fireEvent.click(screen.getByText('Save'));
     await waitFor(() => screen.getByText('Play Show'));
     fireEvent.click(screen.getByText('Play Show'));
 
-    // Game Active
     await waitFor(() => screen.getByText(/End Show/i));
     
-    // Select Player 1
     fireEvent.click(screen.getByText('Player 1'));
     
-    // Open 10pt Question
-    const q10 = screen.getAllByText('10')[0];
-    fireEvent.click(q10);
+    const q50 = screen.getAllByText('50')[0];
+    fireEvent.click(q50);
     
-    // Reveal
     fireEvent.keyDown(window, { code: 'Space' });
-    
-    // Award
     fireEvent.keyDown(window, { code: 'Enter' });
-    
-    // Verify Score = 10 (or 20 if it happened to be DoubleOrNothing, but random is mocked/controlled?)
-    // Our mock for Math.random is not strictly controlled here, so it might be Double.
-    // However, if we check that score > 0, we confirm gameplay works.
-    // Or check if text "10" or "20" appears in scoreboard.
     
     await waitFor(() => {
        const score = screen.getByText(/Player 1/i).closest('div')?.querySelector('.font-mono')?.textContent;
-       expect(score).toMatch(/^(10|20)$/); // 10 or 20 (if double)
+       expect(score).toMatch(/^(50|100)$/); 
     });
   });
-
 });

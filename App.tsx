@@ -58,6 +58,7 @@ const App: React.FC = () => {
     viewSettings: {
       boardFontScale: 1.0,
       tileScale: 1.0,
+      scoreboardScale: 1.0,
       updatedAt: new Date().toISOString()
     }
   });
@@ -240,7 +241,9 @@ const App: React.FC = () => {
            const parsed = JSON.parse(savedState);
            // Migration for viewSettings
            if (!parsed.viewSettings) {
-             parsed.viewSettings = { boardFontScale: 1.0, tileScale: 1.0, updatedAt: new Date().toISOString() };
+             parsed.viewSettings = { boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, updatedAt: new Date().toISOString() };
+           } else if (parsed.viewSettings.scoreboardScale === undefined) {
+             parsed.viewSettings.scoreboardScale = 1.0;
            }
            setGameState(parsed);
            // Fallback: If no show active but game has title, create ghost active show for UI consistency
@@ -390,6 +393,7 @@ const App: React.FC = () => {
       viewSettings: gameState.viewSettings || {
         boardFontScale: 1.0,
         tileScale: 1.0,
+        scoreboardScale: 1.0,
         updatedAt: new Date().toISOString()
       }
     };
@@ -700,7 +704,7 @@ const App: React.FC = () => {
                           </div>
                           
                           {/* Scoreboard Area - Responsive Split */}
-                          <div className="order-1 md:order-2 flex-none h-[25vh] md:h-full w-full md:w-auto relative z-30">
+                          <div className="order-1 md:order-2 flex-none h-auto md:h-full w-full md:w-auto relative z-30">
                             <Scoreboard 
                                 players={gameState.players} 
                                 selectedPlayerId={gameState.selectedPlayerId}
