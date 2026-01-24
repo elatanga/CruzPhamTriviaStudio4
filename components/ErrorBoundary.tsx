@@ -1,4 +1,3 @@
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { logger } from '../services/logger';
 
@@ -13,10 +12,10 @@ interface State {
 
 /**
  * ErrorBoundary component to catch and handle uncaught errors in the React component tree.
- * Explicitly extends React.Component to ensure correctly typed access to this.setState and this.props.
+ * Explicitly extends Component to ensure correctly typed access to this.setState and this.props.
  */
-// Fix: Explicitly extending React.Component to resolve TypeScript errors with setState and props
-export class ErrorBoundary extends React.Component<Props, State> {
+// Fix: Extending Component directly from the named import to ensure TypeScript correctly identifies inherited members
+export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null
@@ -34,7 +33,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   public handleReset = () => {
     // Resetting error state and performing a hard reload to attempt recovery.
-    // Fix: Using this.setState on React.Component to ensure typed access
+    // Fix: Accessing setState from the base Component class
     this.setState({ hasError: false, error: null });
     window.location.reload();
   };
@@ -68,7 +67,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       );
     }
 
-    // Fix: Accessing this.props on React.Component explicitly
+    // Fix: Accessing props from the base Component class
     return this.props.children;
   }
 }

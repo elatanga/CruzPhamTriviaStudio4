@@ -172,6 +172,7 @@ export const DirectorPanel: React.FC<Props> = ({
         <p className="max-w-xs text-center text-sm">Controls are active in the separate window. Close that window or click below to return control here.</p>
         <div className="flex gap-3">
           <button 
+            type="button"
             onClick={onBringBack}
             className="bg-zinc-800 hover:bg-gold-600 hover:text-black text-white px-6 py-2 rounded font-bold uppercase tracking-wider transition-colors"
           >
@@ -196,23 +197,23 @@ export const DirectorPanel: React.FC<Props> = ({
       {/* TOOLBAR */}
       <div className="flex-none h-14 border-b border-zinc-800 flex items-center px-4 justify-between bg-black">
         <div className="flex items-center gap-1">
-          <button onClick={() => { soundService.playClick(); setActiveTab('BOARD'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button type="button" onClick={() => { soundService.playClick(); setActiveTab('BOARD'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Grid className="w-4 h-4" /> Board
           </button>
-          <button onClick={() => { soundService.playClick(); setActiveTab('PLAYERS'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button type="button" onClick={() => { soundService.playClick(); setActiveTab('PLAYERS'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Users className="w-4 h-4" /> Players
           </button>
-          <button onClick={() => { soundService.playClick(); setActiveTab('GAME'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'GAME' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button type="button" onClick={() => { soundService.playClick(); setActiveTab('GAME'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'GAME' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Settings className="w-4 h-4" /> Config
           </button>
         </div>
         
         <div className="flex items-center gap-2">
-          <button onClick={forceCloseDirector} className="p-2 text-zinc-600 hover:text-red-500" title="Force Reset UI">
+          <button type="button" onClick={forceCloseDirector} className="p-2 text-zinc-600 hover:text-red-500" title="Force Reset UI">
              <RotateCcw className="w-4 h-4" />
           </button>
           {onPopout && (
-            <button onClick={() => { soundService.playClick(); onPopout(); }} className="flex items-center gap-2 text-xs font-bold uppercase text-gold-500 border border-gold-900/50 px-3 py-1.5 rounded hover:bg-gold-900/20">
+            <button type="button" onClick={() => { soundService.playClick(); onPopout(); }} className="flex items-center gap-2 text-xs font-bold uppercase text-gold-500 border border-gold-900/50 px-3 py-1.5 rounded hover:bg-gold-900/20">
               <ExternalLink className="w-3 h-3" /> Detach
             </button>
           )}
@@ -249,6 +250,7 @@ export const DirectorPanel: React.FC<Props> = ({
                        {[15, 30, 60].map(d => (
                          <button 
                            key={d}
+                           type="button"
                            onClick={() => updateTimer({ duration: d })}
                            className={`px-2 py-0.5 text-[10px] rounded border ${gameState.timer.duration === d ? 'bg-gold-600 text-black border-gold-600' : 'bg-black text-zinc-400 border-zinc-800'}`}
                          >
@@ -260,11 +262,11 @@ export const DirectorPanel: React.FC<Props> = ({
                 </div>
                 <div className="flex items-center gap-2">
                   {!gameState.timer.isRunning ? (
-                     <button onClick={startTimer} className="bg-green-600 hover:bg-green-500 text-white p-2 rounded-full"><Play className="w-4 h-4" /></button>
+                     <button type="button" onClick={startTimer} className="bg-green-600 hover:bg-green-500 text-white p-2 rounded-full"><Play className="w-4 h-4" /></button>
                   ) : (
-                     <button onClick={stopTimer} className="bg-yellow-600 hover:bg-yellow-500 text-black p-2 rounded-full"><Pause className="w-4 h-4" /></button>
+                     <button type="button" onClick={stopTimer} className="bg-yellow-600 hover:bg-yellow-500 text-black p-2 rounded-full"><Pause className="w-4 h-4" /></button>
                   )}
-                  <button onClick={resetTimer} className="bg-zinc-800 hover:bg-zinc-700 text-white p-2 rounded-full"><RotateCcw className="w-4 h-4" /></button>
+                  <button type="button" onClick={resetTimer} className="bg-zinc-800 hover:bg-zinc-700 text-white p-2 rounded-full"><RotateCcw className="w-4 h-4" /></button>
                 </div>
               </div>
 
@@ -285,6 +287,7 @@ export const DirectorPanel: React.FC<Props> = ({
                           { [0.85, 1.0, 1.15, 1.25, 1.35].map((scale, i) => (
                              <button 
                                 key={scale} 
+                                type="button"
                                 onClick={() => updateViewSettings({ boardFontScale: scale })}
                                 className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.boardFontScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
                              >
@@ -301,6 +304,7 @@ export const DirectorPanel: React.FC<Props> = ({
                           { [0.85, 1.0, 1.15].map((scale, i) => (
                              <button 
                                 key={scale} 
+                                type="button"
                                 onClick={() => updateViewSettings({ tileScale: scale })}
                                 className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.tileScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
                              >
@@ -317,6 +321,7 @@ export const DirectorPanel: React.FC<Props> = ({
                           { [0.9, 1.0, 1.2, 1.4].map((scale, i) => (
                              <button 
                                 key={scale} 
+                                type="button"
                                 onClick={() => updateViewSettings({ scoreboardScale: scale })}
                                 className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.scoreboardScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}
                              >
@@ -333,6 +338,7 @@ export const DirectorPanel: React.FC<Props> = ({
                <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Live Board Control</h3>
                {gameState.activeQuestionId && (
                  <button 
+                   type="button"
                    onClick={() => { soundService.playClick(); onUpdateState({...gameState, activeQuestionId: null, activeCategoryId: null}); }} 
                    className="bg-red-900/50 text-red-200 border border-red-800 px-3 py-1 rounded text-xs font-bold uppercase flex items-center gap-2 hover:bg-red-900"
                  >
@@ -350,7 +356,7 @@ export const DirectorPanel: React.FC<Props> = ({
                       onChange={e => handleUpdateCategoryTitle(cIdx, e.target.value)}
                       className="bg-zinc-900 text-gold-400 font-bold text-xs p-2 rounded w-full border border-transparent focus:border-gold-500 outline-none"
                     />
-                    <button onClick={() => handleAiRewriteCategory(cIdx)} className="text-zinc-600 hover:text-purple-400" title="AI Rewrite Category"><Wand2 className="w-3 h-3" /></button>
+                    <button type="button" onClick={() => handleAiRewriteCategory(cIdx)} className="text-zinc-600 hover:text-purple-400" title="AI Rewrite Category"><Wand2 className="w-3 h-3" /></button>
                   </div>
                   {cat.questions.map((q, qIdx) => (
                     <div 
@@ -409,6 +415,7 @@ export const DirectorPanel: React.FC<Props> = ({
                        </td>
                        <td className="p-3">
                          <button 
+                            type="button"
                             onClick={() => {
                               if(confirm('Remove player?')) {
                                 soundService.playClick();
@@ -465,7 +472,7 @@ export const DirectorPanel: React.FC<Props> = ({
                   <h3 className="text-gold-500 font-bold">{cat.title} // {q.points}</h3>
                   {q.isVoided && <span className="text-red-500 text-xs font-bold uppercase tracking-wider">Currently Voided</span>}
                 </div>
-                <button onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
+                <button type="button" onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
@@ -492,17 +499,18 @@ export const DirectorPanel: React.FC<Props> = ({
                     <Wand2 className="w-3 h-3" /> AI Replacement
                   </p>
                   <div className="flex gap-2">
-                    <button onClick={() => handleAiReplace(cIdx, qIdx, 'easy')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Easy</button>
-                    <button onClick={() => handleAiReplace(cIdx, qIdx, 'medium')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Med</button>
-                    <button onClick={() => handleAiReplace(cIdx, qIdx, 'hard')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Hard</button>
+                    <button type="button" onClick={() => handleAiReplace(cIdx, qIdx, 'easy')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Easy</button>
+                    <button type="button" onClick={() => handleAiReplace(cIdx, qIdx, 'medium')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Med</button>
+                    <button type="button" onClick={() => handleAiReplace(cIdx, qIdx, 'hard')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Hard</button>
                   </div>
                   {aiLoading && <div className="mt-2 text-center text-xs text-gold-500 animate-pulse">Generating...</div>}
                 </div>
               </div>
 
               <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-zinc-800">
-                <button onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
+                <button type="button" onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
                 <button 
+                  type="button"
                   onClick={() => {
                      const txt = (document.getElementById('dir-q-text') as HTMLTextAreaElement).value;
                      const ans = (document.getElementById('dir-q-answer') as HTMLTextAreaElement).value;

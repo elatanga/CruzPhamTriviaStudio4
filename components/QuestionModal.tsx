@@ -64,11 +64,17 @@ export const QuestionModal: React.FC<Props> = ({
     if (isDouble && !isRevealed) soundService.playDoubleOrNothing();
   }, [isDouble, isRevealed]);
 
-  const handleAction = useCallback((action: 'reveal' | 'award' | 'steal' | 'void' | 'return') => {
+  const handleAction = useCallback((action: 'reveal' | 'award' | 'steal' | 'void' | 'return', event?: React.MouseEvent | React.KeyboardEvent) => {
+    // Prevent default and stop propagation to ensure no background form validation is triggered
+    if (event) {
+      if ('preventDefault' in event) event.preventDefault();
+      if ('stopPropagation' in event) event.stopPropagation();
+    }
+
     // LOCK RULE: Before reveal, only 'reveal' is allowed.
     if (!isRevealed && action !== 'reveal') return;
     
-    if (showStealSelect && action !== 'return') return; // Block other keys if steal menu open
+    if (showStealSelect && action !== 'return') return; // Block other actions if steal menu open
 
     switch (action) {
       case 'reveal':
@@ -90,8 +96,9 @@ export const QuestionModal: React.FC<Props> = ({
         }
         break;
       case 'void':
+        // HARDENED VOID: Only post-reveal. 
         if (isRevealed) {
-          // Explicitly confirm before destroying the question state
+          // Note: Using window.confirm is safe, but we ensure it doesn't collide with browser validation by type="button"
           if (window.confirm('Mark this question as VOID?\n\nThis will lock the tile and close the view. It can only be reset from the Director Panel.')) {
             soundService.playVoid();
             onClose('void');
@@ -111,7 +118,7 @@ export const QuestionModal: React.FC<Props> = ({
   // Keyboard Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      e.stopPropagation(); // Stop propagation to global board listeners
+      e.stopPropagation(); 
       
       switch (e.code) {
         case 'Space':
@@ -162,7 +169,7 @@ export const QuestionModal: React.FC<Props> = ({
         <div className="flex items-center gap-6">
           {isDouble && (
             <div className="bg-red-700 text-white px-4 py-1 rounded-full animate-pulse border-2 border-red-900">
-               <span className="text-xs md:text-sm font-black tracking-tighter">DOUBLE OR NOTHING</span>
+               <span className="text-xs md:text-sm font-black tracking-tighter uppercase">DOUBLE OR NOTHING</span>
             </div>
           )}
           <div className="text-right">
@@ -222,7 +229,7 @@ export const QuestionModal: React.FC<Props> = ({
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => onClose('steal', p.id)}
+                  onClick={(e) => { e.stopPropagation(); onClose('steal', p.id); }}
                   className="bg-zinc-900 border-4 border-zinc-800 hover:border-purple-500 hover:bg-purple-900/40 p-8 md:p-12 rounded-2xl text-2xl md:text-4xl font-black text-white transition-all transform hover:scale-105 active:scale-95"
                 >
                   {p.name}
@@ -231,7 +238,7 @@ export const QuestionModal: React.FC<Props> = ({
             </div>
             <button 
               type="button" 
-              onClick={() => setShowStealSelect(false)} 
+              onClick={(e) => { e.stopPropagation(); setShowStealSelect(false); }} 
               className="mt-16 text-zinc-500 hover:text-white uppercase text-xl font-black tracking-widest border-b-4 border-transparent hover:border-white transition-all"
             >
               Cancel Steal
@@ -247,7 +254,7 @@ export const QuestionModal: React.FC<Props> = ({
           {!isRevealed ? (
             <button 
               type="button"
-              onClick={() => handleAction('reveal')}
+              onClick={(e) => handleAction('reveal', e)}
               className="bg-gold-600 hover:bg-gold-500 text-black font-black text-2xl md:text-4xl px-12 md:px-20 py-4 md:py-6 rounded-2xl shadow-2xl uppercase tracking-tighter flex items-center gap-4 transition-transform active:scale-95 group"
             >
               <Monitor className="w-6 h-6 md:w-10 md:h-10 group-hover:animate-pulse" /> 
@@ -258,7 +265,7 @@ export const QuestionModal: React.FC<Props> = ({
             <div data-testid="action-buttons-container" className="flex flex-wrap justify-center gap-4 md:gap-6 animate-in slide-in-from-bottom-4 duration-300">
               <button 
                 type="button"
-                onClick={() => handleAction('return')}
+                onClick={(e) => handleAction('return', e)}
                 className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-blue-400 transition-all px-4 py-2 rounded-xl hover:bg-blue-900/10 border-2 border-transparent hover:border-blue-900/30"
               >
                 <div className="p-3 bg-zinc-900 rounded-full mb-1 shadow-lg"><ArrowLeft className="w-5 h-5 md:w-6 md:h-6" /></div>
@@ -267,7 +274,7 @@ export const QuestionModal: React.FC<Props> = ({
 
               <button 
                 type="button"
-                onClick={() => handleAction('void')}
+                onClick={(e) => handleAction('void', e)}
                 className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-red-500 transition-all px-4 py-2 rounded-xl hover:bg-red-900/10 border-2 border-transparent hover:border-red-900/30"
               >
                 <div className="p-3 bg-zinc-900 rounded-full mb-1 shadow-lg"><Trash2 className="w-5 h-5 md:w-6 md:h-6" /></div>
@@ -278,7 +285,7 @@ export const QuestionModal: React.FC<Props> = ({
 
               <button 
                 type="button"
-                onClick={() => handleAction('steal')}
+                onClick={(e) => handleAction('steal', e)}
                 className="flex flex-col items-center justify-center gap-1 text-purple-500 hover:text-purple-300 transition-all px-4 py-2 rounded-xl hover:bg-purple-900/20 border-2 border-transparent hover:border-purple-500/30 group"
               >
                 <div className="p-3 bg-purple-900/20 border-4 border-purple-900 group-hover:bg-purple-600 group-hover:text-black group-hover:border-purple-500 rounded-full mb-1 shadow-2xl transition-all scale-110"><ShieldAlert className="w-6 h-6 md:w-8 md:h-8" /></div>
@@ -287,7 +294,7 @@ export const QuestionModal: React.FC<Props> = ({
 
               <button 
                 type="button"
-                onClick={() => handleAction('award')}
+                onClick={(e) => handleAction('award', e)}
                 disabled={!selectedPlayerId}
                 className="flex flex-col items-center justify-center gap-1 text-green-500 hover:text-green-300 transition-all px-4 py-2 rounded-xl hover:bg-green-900/20 border-2 border-transparent hover:border-green-500/30 group disabled:opacity-30 disabled:grayscale disabled:pointer-events-none"
               >
