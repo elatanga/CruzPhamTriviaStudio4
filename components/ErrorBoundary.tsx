@@ -1,5 +1,5 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { logger } from '../services/logger';
 
 interface Props {
@@ -14,8 +14,8 @@ interface State {
 /**
  * ErrorBoundary component to catch and handle uncaught errors in the React component tree.
  */
-// Fix: Use Component from react to ensure the class correctly inherits members like setState and props
-export class ErrorBoundary extends Component<Props, State> {
+// Fix: Explicitly extend React.Component to ensure TypeScript recognizes inherited members like setState and props
+export class ErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null
@@ -31,7 +31,7 @@ export class ErrorBoundary extends Component<Props, State> {
     logger.error('Uncaught error in component tree', { error, errorInfo });
   }
 
-  // Fix: handleReset correctly uses this.setState inherited from Component
+  // Fix: Accessing this.setState inherited from React.Component
   public handleReset = () => {
     // Resetting error state and performing a hard reload to attempt recovery.
     this.setState({ hasError: false, error: null });
@@ -67,7 +67,7 @@ export class ErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // Fix: Accessing children from props inherited from Component
+    // Fix: Accessing this.props inherited from React.Component
     return this.props.children;
   }
 }

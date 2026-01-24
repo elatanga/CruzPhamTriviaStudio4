@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { QuestionModal } from './QuestionModal';
@@ -38,6 +37,11 @@ const mockQuestion: Question = {
   isDoubleOrNothing: false,
 };
 
+const mockDoubleQuestion: Question = {
+  ...mockQuestion,
+  isDoubleOrNothing: true,
+};
+
 const mockPlayers: Player[] = [
   { id: 'p1', name: 'Alice', score: 0, color: '#fff' },
 ];
@@ -48,7 +52,7 @@ const mockTimer: GameTimer = {
   isRunning: false,
 };
 
-describe('QuestionModal Component Hardening', () => {
+describe('QuestionModal Component Logic', () => {
   test('VOID ACTION TEST: Void button triggers onClose with "void" post-reveal after confirmation', () => {
     const onClose = jest.fn();
     render(
@@ -90,5 +94,21 @@ describe('QuestionModal Component Hardening', () => {
     fireEvent.click(awardBtn!);
     
     expect(onClose).toHaveBeenCalledWith('award', 'p1');
+  });
+
+  test('DOUBLE OR NOTHING: Displays full label when question is active', () => {
+    render(
+      <QuestionModal
+        question={mockDoubleQuestion}
+        categoryTitle="Geography"
+        players={mockPlayers}
+        selectedPlayerId="p1"
+        timer={mockTimer}
+        onClose={jest.fn()}
+        onReveal={jest.fn()}
+      />
+    );
+
+    expect(screen.getByText('DOUBLE OR NOTHING')).toBeInTheDocument();
   });
 });

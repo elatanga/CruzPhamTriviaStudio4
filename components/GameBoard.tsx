@@ -93,10 +93,7 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
                      </span>
                    )}
                    
-                   {/* Double Or Nothing Indicator */}
-                   {q.isDoubleOrNothing && !q.isAnswered && !q.isVoided && (
-                     <div className="absolute top-1 right-1 bg-red-600 text-white text-[8px] md:text-[10px] px-1 rounded font-mono animate-pulse">2X</div>
-                   )}
+                   {/* Double Or Nothing Indicator REMOVED from player view per requirement */}
                  </button>
                );
              })}
