@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout } from 'lucide-react';
-import { GameState, Question, Difficulty, Category, BoardViewSettings } from '../types';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star } from 'lucide-react';
+import { GameState, Question, Difficulty, Category, BoardViewSettings, Player } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
 import { soundService } from '../services/soundService';
@@ -33,6 +34,28 @@ export const DirectorPanel: React.FC<Props> = ({
       p.id === id ? { ...p, [field]: value } : p
     );
     onUpdateState({ ...gameState, players: newPlayers });
+  };
+
+  const handleUseWildcard = (player: Player) => {
+    soundService.playClick();
+    const currentUsed = player.wildcardsUsed || 0;
+    
+    // Hard Limit Enforcement: Max 4
+    if (currentUsed >= 4) {
+      addToast('error', 'Max wildcards (4) reached for this player.');
+      logger.warn('wildcard_use_blocked_max', { playerId: player.id, wildcardsUsed: currentUsed });
+      return;
+    }
+
+    const nextUsed = currentUsed + 1;
+
+    const newPlayers = gameState.players.map(p => 
+      p.id === player.id ? { ...p, wildcardsUsed: nextUsed } : p
+    );
+    
+    onUpdateState({ ...gameState, players: newPlayers });
+    logger.info('wildcard_use_applied', { playerId: player.id, wildcardsUsed: nextUsed });
+    addToast('success', `${player.name}: Wildcard Used (${nextUsed}/4)`);
   };
 
   const handleUpdateCategoryTitle = (cIdx: number, title: string) => {
@@ -384,7 +407,7 @@ export const DirectorPanel: React.FC<Props> = ({
 
         {/* === PLAYERS EDITOR === */}
         {activeTab === 'PLAYERS' && (
-          <div className="max-w-2xl mx-auto space-y-4">
+          <div className="max-w-3xl mx-auto space-y-4">
              <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm mb-4">Contestant Management</h3>
              <div className="bg-zinc-900 rounded border border-zinc-800 overflow-hidden">
                <table className="w-full text-left text-sm">
@@ -392,43 +415,69 @@ export const DirectorPanel: React.FC<Props> = ({
                    <tr>
                      <th className="p-3">Name</th>
                      <th className="p-3">Score</th>
-                     <th className="p-3">Actions</th>
+                     <th className="p-3 text-center">Wildcard</th>
+                     <th className="p-3 text-right">Actions</th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-zinc-800">
-                   {gameState.players.map(p => (
-                     <tr key={p.id} className="hover:bg-zinc-800/50">
-                       <td className="p-3">
-                         <input 
-                           value={p.name} 
-                           onChange={e => handleUpdatePlayer(p.id, 'name', e.target.value)}
-                           className="bg-transparent text-white font-bold outline-none border-b border-transparent focus:border-gold-500 w-full"
-                         />
-                       </td>
-                       <td className="p-3">
-                         <input 
-                           type="number"
-                           value={p.score} 
-                           onChange={e => handleUpdatePlayer(p.id, 'score', parseInt(e.target.value) || 0)}
-                           className="bg-transparent text-gold-400 font-mono outline-none border-b border-transparent focus:border-gold-500 w-24"
-                         />
-                       </td>
-                       <td className="p-3">
-                         <button 
-                            type="button"
-                            onClick={() => {
-                              if(confirm('Remove player?')) {
-                                soundService.playClick();
-                                onUpdateState({...gameState, players: gameState.players.filter(x => x.id !== p.id)});
-                              }
-                            }}
-                            className="text-zinc-600 hover:text-red-500"
-                         >
-                           <X className="w-4 h-4" />
-                         </button>
-                       </td>
-                     </tr>
-                   ))}
+                   {gameState.players.map(p => {
+                     const used = p.wildcardsUsed || 0;
+                     const isMaxed = used >= 4;
+
+                     return (
+                       <tr key={p.id} className="hover:bg-zinc-800/50">
+                         <td className="p-3">
+                           <input 
+                             value={p.name} 
+                             onChange={e => handleUpdatePlayer(p.id, 'name', e.target.value)}
+                             className="bg-transparent text-white font-bold outline-none border-b border-transparent focus:border-gold-500 w-full"
+                           />
+                         </td>
+                         <td className="p-3">
+                           <input 
+                             type="number"
+                             value={p.score} 
+                             onChange={e => handleUpdatePlayer(p.id, 'score', parseInt(e.target.value) || 0)}
+                             className="bg-transparent text-gold-400 font-mono outline-none border-b border-transparent focus:border-gold-500 w-24"
+                           />
+                         </td>
+                         <td className="p-3 flex items-center justify-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => !isMaxed && handleUseWildcard(p)}
+                              disabled={isMaxed}
+                              className={`
+                                flex items-center gap-2 px-3 py-1 rounded text-[10px] font-bold uppercase transition-all
+                                ${isMaxed 
+                                  ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700' 
+                                  : 'bg-gold-600/20 text-gold-500 hover:bg-gold-600/40 border border-gold-600/50'}
+                              `}
+                              title={isMaxed ? "Limit Reached" : "Increment Wildcard Usage"}
+                            >
+                              <Star className={`w-3 h-3 ${isMaxed ? 'text-zinc-500' : 'text-gold-500 fill-gold-500'}`} />
+                              {isMaxed ? 'MAX 4 USED' : 'Use Wildcard'}
+                            </button>
+                            <span className={`text-[10px] font-bold font-mono ${isMaxed ? 'text-red-500' : 'text-zinc-500'}`}>
+                              {used}/4
+                            </span>
+                         </td>
+                         <td className="p-3 text-right">
+                           <button 
+                              type="button"
+                              onClick={() => {
+                                if(confirm('Remove player?')) {
+                                  soundService.playClick();
+                                  onUpdateState({...gameState, players: gameState.players.filter(x => x.id !== p.id)});
+                                }
+                              }}
+                              className="text-zinc-600 hover:text-red-500 p-1"
+                           >
+                             <X className="w-4 h-4" />
+                           </button>
+                         </td>
+                       </tr>
+                     );
+                   })}
                  </tbody>
                </table>
                {gameState.players.length === 0 && <div className="p-4 text-center text-zinc-600">No players.</div>}

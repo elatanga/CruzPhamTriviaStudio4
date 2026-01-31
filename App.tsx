@@ -299,12 +299,12 @@ const App: React.FC = () => {
     });
 
     const initPlayers: Player[] = (template.config.playerNames || []).map(name => ({
-      id: crypto.randomUUID(), name, score: 0, color: '#ffffff'
+      id: crypto.randomUUID(), name, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false
     }));
 
     if (initPlayers.length === 0 && template.config.playerCount > 0) {
       for (let i = 0; i < template.config.playerCount; i++) {
-        initPlayers.push({ id: crypto.randomUUID(), name: `Player ${i + 1}`, score: 0, color: '#ffffff' });
+        initPlayers.push({ id: crypto.randomUUID(), name: `Player ${i + 1}`, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false });
       }
     }
 
@@ -390,7 +390,7 @@ const App: React.FC = () => {
   };
 
   const handleAddPlayer = (name: string) => {
-    const newPlayer: Player = { id: crypto.randomUUID(), name, score: 0, color: '#fff' };
+    const newPlayer: Player = { id: crypto.randomUUID(), name, score: 0, color: '#fff', wildcardsUsed: 0, wildcardActive: false };
     saveGameState({ 
       ...gameState, 
       players: [...gameState.players, newPlayer],

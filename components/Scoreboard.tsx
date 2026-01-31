@@ -14,6 +14,13 @@ interface Props {
   viewSettings: BoardViewSettings;
 }
 
+const STAR_COLOR_BY_COUNT: Record<number, string> = {
+  1: "#FF8A00", // Bright Orange
+  2: "#FFB300", // Orange-Yellow
+  3: "#FFD000", // Yellow-Orange
+  4: "#FFD400"  // Bright Yellow
+};
+
 export const Scoreboard: React.FC<Props> = ({ 
   players, selectedPlayerId, onAddPlayer, onUpdateScore, onSelectPlayer, viewSettings
 }) => {
@@ -50,6 +57,8 @@ export const Scoreboard: React.FC<Props> = ({
       <div className="flex-1 overflow-y-auto p-2 space-y-3 custom-scrollbar" style={{ padding: `calc(0.5rem * var(--scoreboard-scale))` }}>
         {players.map(p => {
           const isSelected = p.id === selectedPlayerId;
+          const starsCount = p.wildcardsUsed || 0;
+
           return (
             <div 
               key={p.id} 
@@ -63,12 +72,26 @@ export const Scoreboard: React.FC<Props> = ({
               style={{ minHeight: `calc(4.5rem * var(--scoreboard-scale))` }}
             >
               <div className="flex justify-between items-center">
-                <span 
-                  className={`truncate pr-2 font-roboto font-bold tracking-wide ${isSelected ? 'text-white' : 'text-zinc-400'}`} 
-                  style={{ fontSize: `calc(clamp(16px, 1.6vw, 30px) * var(--scoreboard-scale))` }}
-                >
-                  {p.name}
-                </span>
+                <div className="flex items-center min-w-0 flex-1 mr-2 overflow-hidden">
+                  <span 
+                    className={`truncate pr-2 font-roboto font-bold tracking-wide ${isSelected ? 'text-white' : 'text-zinc-400'}`} 
+                    style={{ fontSize: `calc(clamp(16px, 1.6vw, 30px) * var(--scoreboard-scale))` }}
+                  >
+                    {p.name}
+                  </span>
+                  {starsCount > 0 && (
+                    <span 
+                      aria-hidden="true" 
+                      className="shrink-0 drop-shadow-md text-sm md:text-base leading-none"
+                      style={{ 
+                        color: STAR_COLOR_BY_COUNT[Math.min(starsCount, 4)] || '#FFD400',
+                        fontSize: `calc(clamp(12px, 1.2vw, 24px) * var(--scoreboard-scale))`
+                      }}
+                    >
+                      {'★'.repeat(Math.min(starsCount, 4))}
+                    </span>
+                  )}
+                </div>
                 <span className="font-mono font-black text-gold-400 drop-shadow-md" style={{ fontSize: `calc(1.4rem * var(--scoreboard-scale) * var(--board-font-scale))` }}>
                   {p.score}
                 </span>
