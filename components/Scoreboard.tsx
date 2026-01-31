@@ -58,6 +58,7 @@ export const Scoreboard: React.FC<Props> = ({
         {players.map(p => {
           const isSelected = p.id === selectedPlayerId;
           const starsCount = p.wildcardsUsed || 0;
+          const stealsCount = p.stealsCount || 0;
 
           return (
             <div 
@@ -72,9 +73,9 @@ export const Scoreboard: React.FC<Props> = ({
               style={{ minHeight: `calc(4.5rem * var(--scoreboard-scale))` }}
             >
               <div className="flex justify-between items-center">
-                <div className="flex items-center min-w-0 flex-1 mr-2 overflow-hidden">
+                <div className="flex items-center min-w-0 flex-1 mr-2 overflow-hidden gap-2">
                   <span 
-                    className={`truncate pr-2 font-roboto font-bold tracking-wide ${isSelected ? 'text-white' : 'text-zinc-400'}`} 
+                    className={`truncate pr-1 font-roboto font-bold tracking-wide ${isSelected ? 'text-white' : 'text-zinc-400'}`} 
                     style={{ fontSize: `calc(clamp(16px, 1.6vw, 30px) * var(--scoreboard-scale))` }}
                   >
                     {p.name}
@@ -89,6 +90,14 @@ export const Scoreboard: React.FC<Props> = ({
                       }}
                     >
                       {'★'.repeat(Math.min(starsCount, 4))}
+                    </span>
+                  )}
+                  {stealsCount > 0 && (
+                    <span 
+                      className="shrink-0 text-[9px] md:text-[10px] bg-purple-900/50 text-purple-200 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider border border-purple-500/30"
+                      style={{ fontSize: `calc(clamp(9px, 0.9vw, 14px) * var(--scoreboard-scale))` }}
+                    >
+                      STEALS: {stealsCount}
                     </span>
                   )}
                 </div>

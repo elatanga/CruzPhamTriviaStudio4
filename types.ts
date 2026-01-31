@@ -23,6 +23,7 @@ export interface Player {
   color: string;
   wildcardsUsed?: number; // Track usage count (0-4)
   wildcardActive?: boolean; // Track current active status
+  stealsCount?: number; // Track successful steals
 }
 
 export interface GameTimer {

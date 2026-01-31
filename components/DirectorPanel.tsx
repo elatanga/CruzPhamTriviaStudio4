@@ -415,6 +415,7 @@ export const DirectorPanel: React.FC<Props> = ({
                    <tr>
                      <th className="p-3">Name</th>
                      <th className="p-3">Score</th>
+                     <th className="p-3 text-center">Steals</th>
                      <th className="p-3 text-center">Wildcard</th>
                      <th className="p-3 text-right">Actions</th>
                    </tr>
@@ -422,6 +423,7 @@ export const DirectorPanel: React.FC<Props> = ({
                  <tbody className="divide-y divide-zinc-800">
                    {gameState.players.map(p => {
                      const used = p.wildcardsUsed || 0;
+                     const steals = p.stealsCount || 0;
                      const isMaxed = used >= 4;
 
                      return (
@@ -440,6 +442,9 @@ export const DirectorPanel: React.FC<Props> = ({
                              onChange={e => handleUpdatePlayer(p.id, 'score', parseInt(e.target.value) || 0)}
                              className="bg-transparent text-gold-400 font-mono outline-none border-b border-transparent focus:border-gold-500 w-24"
                            />
+                         </td>
+                         <td className="p-3 text-center">
+                           <span className="text-purple-300 font-mono font-bold">{steals}</span>
                          </td>
                          <td className="p-3 flex items-center justify-center gap-3">
                             <button

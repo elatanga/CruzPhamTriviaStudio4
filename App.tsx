@@ -299,12 +299,12 @@ const App: React.FC = () => {
     });
 
     const initPlayers: Player[] = (template.config.playerNames || []).map(name => ({
-      id: crypto.randomUUID(), name, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false
+      id: crypto.randomUUID(), name, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0
     }));
 
     if (initPlayers.length === 0 && template.config.playerCount > 0) {
       for (let i = 0; i < template.config.playerCount; i++) {
-        initPlayers.push({ id: crypto.randomUUID(), name: `Player ${i + 1}`, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false });
+        initPlayers.push({ id: crypto.randomUUID(), name: `Player ${i + 1}`, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0 });
       }
     }
 
@@ -350,7 +350,7 @@ const App: React.FC = () => {
     const activeQ = activeCat?.questions.find(q => q.id === current.activeQuestionId);
     if (!activeCat || !activeQ) return;
 
-    logger.info("void_processing", { action, qId: activeQ.id });
+    logger.info("question_close_action", { action, qId: activeQ.id, targetPlayerId });
 
     const points = (activeQ.isDoubleOrNothing ? activeQ.points * 2 : activeQ.points);
 
@@ -372,8 +372,25 @@ const App: React.FC = () => {
 
     let newPlayers = [...current.players];
     if ((action === 'award' || action === 'steal') && targetPlayerId) {
-      newPlayers = newPlayers.map(p => p.id === targetPlayerId ? { ...p, score: p.score + points } : p);
-      addToast('success', `${points} Points to ${newPlayers.find(p => p.id === targetPlayerId)?.name}`);
+      newPlayers = newPlayers.map(p => {
+        if (p.id === targetPlayerId) {
+          const isSteal = action === 'steal';
+          // Increment stealsCount ONLY if it is a steal action
+          const newStealsCount = isSteal ? (p.stealsCount || 0) + 1 : (p.stealsCount || 0);
+          
+          if (isSteal) {
+            logger.info("steal_award_applied", { tileId: activeQ.id, stealerPlayerId: targetPlayerId, stealsCount: newStealsCount });
+          }
+
+          return { 
+            ...p, 
+            score: p.score + points,
+            stealsCount: newStealsCount
+          };
+        }
+        return p;
+      });
+      addToast('success', `${points} Points to ${newPlayers.find(p => p.id === targetPlayerId)?.name} ${action === 'steal' ? '(Steal!)' : ''}`);
     }
     
     const newState: GameState = {
@@ -385,12 +402,12 @@ const App: React.FC = () => {
       timer: { ...current.timer, endTime: null, isRunning: false }
     };
     
-    logger.info("void_applied", { success: action === 'void' });
+    logger.info("action_completed", { action, success: true });
     saveGameState(newState);
   };
 
   const handleAddPlayer = (name: string) => {
-    const newPlayer: Player = { id: crypto.randomUUID(), name, score: 0, color: '#fff', wildcardsUsed: 0, wildcardActive: false };
+    const newPlayer: Player = { id: crypto.randomUUID(), name, score: 0, color: '#fff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0 };
     saveGameState({ 
       ...gameState, 
       players: [...gameState.players, newPlayer],
