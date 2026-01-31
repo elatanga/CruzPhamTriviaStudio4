@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star } from 'lucide-react';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle } from 'lucide-react';
 import { GameState, Question, Difficulty, Category, BoardViewSettings, Player } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
@@ -22,6 +22,7 @@ export const DirectorPanel: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD'>('BOARD');
   const [editingQuestion, setEditingQuestion] = useState<{cIdx: number, qIdx: number} | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [confirmResetAllWildcards, setConfirmResetAllWildcards] = useState(false);
 
   // --- ACTIONS ---
 
@@ -56,6 +57,36 @@ export const DirectorPanel: React.FC<Props> = ({
     onUpdateState({ ...gameState, players: newPlayers });
     logger.info('wildcard_use_applied', { playerId: player.id, wildcardsUsed: nextUsed });
     addToast('success', `${player.name}: Wildcard Used (${nextUsed}/4)`);
+  };
+
+  const handleResetWildcard = (player: Player) => {
+    if (!player.wildcardsUsed || player.wildcardsUsed <= 0) return;
+    
+    soundService.playClick();
+    const newPlayers = gameState.players.map(p => 
+      p.id === player.id ? { ...p, wildcardsUsed: 0 } : p
+    );
+    
+    onUpdateState({ ...gameState, players: newPlayers });
+    logger.info("wildcards_reset_applied", { playerId: player.id, wildcardsUsed: 0 });
+    addToast('info', `Wildcards reset for ${player.name}`);
+  };
+
+  const handleResetAllWildcards = () => {
+    if (!confirmResetAllWildcards) {
+      soundService.playClick();
+      setConfirmResetAllWildcards(true);
+      setTimeout(() => setConfirmResetAllWildcards(false), 3000); // Auto-reset confirmation
+      return;
+    }
+
+    soundService.playClick();
+    const newPlayers = gameState.players.map(p => ({ ...p, wildcardsUsed: 0 }));
+    onUpdateState({ ...gameState, players: newPlayers });
+    
+    logger.info("wildcards_reset_all_applied", { countPlayers: newPlayers.length });
+    addToast('success', 'All wildcards reset to 0');
+    setConfirmResetAllWildcards(false);
   };
 
   const handleUpdateCategoryTitle = (cIdx: number, title: string) => {
@@ -408,7 +439,16 @@ export const DirectorPanel: React.FC<Props> = ({
         {/* === PLAYERS EDITOR === */}
         {activeTab === 'PLAYERS' && (
           <div className="max-w-3xl mx-auto space-y-4">
-             <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm mb-4">Contestant Management</h3>
+             <div className="flex justify-between items-center mb-4">
+               <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Contestant Management</h3>
+               <button 
+                 onClick={handleResetAllWildcards}
+                 className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase border transition-all ${confirmResetAllWildcards ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-white'}`}
+               >
+                 <RotateCcw className="w-3 h-3" /> {confirmResetAllWildcards ? 'Click to Confirm Reset All' : 'Reset All Wildcards'}
+               </button>
+             </div>
+             
              <div className="bg-zinc-900 rounded border border-zinc-800 overflow-hidden">
                <table className="w-full text-left text-sm">
                  <thead className="bg-black text-zinc-500 uppercase font-mono text-xs">
@@ -460,11 +500,20 @@ export const DirectorPanel: React.FC<Props> = ({
                               title={isMaxed ? "Limit Reached" : "Increment Wildcard Usage"}
                             >
                               <Star className={`w-3 h-3 ${isMaxed ? 'text-zinc-500' : 'text-gold-500 fill-gold-500'}`} />
-                              {isMaxed ? 'MAX 4 USED' : 'Use Wildcard'}
+                              {isMaxed ? 'MAX' : 'Use'}
                             </button>
-                            <span className={`text-[10px] font-bold font-mono ${isMaxed ? 'text-red-500' : 'text-zinc-500'}`}>
+                            <span className={`text-[10px] font-bold font-mono min-w-[20px] text-center ${isMaxed ? 'text-red-500' : 'text-zinc-500'}`}>
                               {used}/4
                             </span>
+                            <button 
+                              type="button"
+                              onClick={() => handleResetWildcard(p)}
+                              disabled={used === 0}
+                              className="p-1.5 rounded text-zinc-500 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent"
+                              title="Reset Wildcards"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
                          </td>
                          <td className="p-3 text-right">
                            <button 
@@ -477,7 +526,7 @@ export const DirectorPanel: React.FC<Props> = ({
                               }}
                               className="text-zinc-600 hover:text-red-500 p-1"
                            >
-                             <X className="w-4 h-4" />
+                             <Trash2 className="w-4 h-4" />
                            </button>
                          </td>
                        </tr>
