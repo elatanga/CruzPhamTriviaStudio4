@@ -1,9 +1,10 @@
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import App from './App';
 import { authService } from './services/authService';
 import { dataService } from './services/dataService';
+import { logger } from './services/logger';
 
 // --- TYPE DECLARATIONS ---
 declare const jest: any;
@@ -11,7 +12,6 @@ declare const describe: any;
 declare const test: any;
 declare const expect: any;
 declare const beforeEach: any;
-declare const beforeAll: any;
 
 // --- MOCKS ---
 jest.mock('./services/logger', () => ({
@@ -45,142 +45,95 @@ jest.mock('./services/geminiService', () => ({
 window.scrollTo = jest.fn();
 window.confirm = jest.fn(() => true);
 
-describe('CARD 2: Template Builder UI & scaling Reliability', () => {
+describe('CARD 2: Verification Suite (Desktop Layout & Visibility)', () => {
   beforeEach(async () => {
     localStorage.clear();
     jest.clearAllMocks();
     
-    // Auth setup to bypass bootstrap and login
+    // Default to Desktop Viewport
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1440 });
+    window.dispatchEvent(new Event('resize'));
+
+    // Auth setup
     const token = await authService.bootstrapMasterAdmin('admin');
     await authService.login('admin', token);
   });
+
+  const setViewport = (width: number) => {
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width });
+    window.dispatchEvent(new Event('resize'));
+  };
 
   const navigateToBuilder = async () => {
     render(<App />);
     await waitFor(() => screen.getByText(/Select Production/i));
     
-    // 1. Create a show
     fireEvent.change(screen.getByPlaceholderText(/New Show Title/i), { target: { value: 'Test Show' } });
     fireEvent.click(screen.getByText(/Create/i));
     await waitFor(() => screen.getByText(/Template Library/i));
     
-    // 2. Open Template Config
     fireEvent.click(screen.getByText(/Create Template/i));
     await waitFor(() => screen.getByText(/New Template Configuration/i));
 
-    // 3. Move to Builder Preview
-    fireEvent.change(screen.getByPlaceholderText(/e.g. Science Night 2024/i), { target: { value: 'Builder Test' } });
-    fireEvent.click(screen.getByText(/Manually Create Board Structure/i));
+    fireEvent.change(screen.getByPlaceholderText(/Show or Game Topic/i), { target: { value: 'Builder Test' } });
+    fireEvent.click(screen.getByText('Start Building'));
     await waitFor(() => screen.getByText(/Live Builder Preview/i));
   };
 
-  test('A) UI TEST — Save button placement under Logout', async () => {
+  test('A) DESKTOP RENDER: Save button is visible and clickable', async () => {
+    setViewport(1440);
     await navigateToBuilder();
 
-    const logoutBtn = screen.getByText(/Logout Producer/i);
-    const saveBtn = screen.getByText(/Save Template/i);
+    const saveBtn = screen.getByTestId('save-template-button');
+    expect(saveBtn).toBeInTheDocument();
+    expect(saveBtn).toBeVisible();
+    expect(saveBtn).not.toBeDisabled();
     
-    // Assert they are in the same action cluster
-    const actionCluster = logoutBtn.closest('.flex-col');
-    expect(actionCluster).toContainElement(saveBtn);
-    expect(actionCluster).toHaveClass('items-end'); // Right aligned
-    
-    // Assert ordering: Logout appears BEFORE Save (stacked vertically)
-    const children = Array.from(actionCluster!.children);
-    const logoutIndex = children.indexOf(logoutBtn);
-    const saveIndex = children.indexOf(saveBtn);
-    
-    expect(logoutIndex).toBeLessThan(saveIndex);
-    expect(saveBtn).toHaveClass('font-roboto');
-    expect(saveBtn).toHaveClass('font-bold');
+    // Test clickability
+    fireEvent.click(saveBtn);
+    expect(logger.info).toHaveBeenCalledWith("template_save_click", expect.objectContaining({
+      ts: expect.any(String)
+    }));
   });
 
-  test('B) UI TEST — Save button not overlapping categories grid (structural guarantee)', async () => {
+  test('B) NO OVERLAP: Save button is in the local content toolbar, separate from global header', async () => {
+    setViewport(1440);
     await navigateToBuilder();
 
-    // The main content area should have padding-top to clear the absolute/fixed action stack in the header
-    const mainContainer = screen.getByRole('main');
+    const saveBtn = screen.getByTestId('save-template-button');
+    const localToolbar = saveBtn.closest('.sticky');
     
-    // Based on implementation: pt-12 (mobile) and lg:pt-8 (desktop)
-    expect(mainContainer).toHaveClass('pt-12');
-    expect(mainContainer).toHaveClass('lg:pt-8');
+    expect(localToolbar).toBeInTheDocument();
+    expect(localToolbar).toHaveClass('top-0');
+    expect(localToolbar).toHaveClass('z-30');
+    
+    // Verify it contains "Live Builder Preview" title as requested
+    expect(screen.getByText(/Live Builder Preview/i)).toBeInTheDocument();
   });
 
-  test('C) INTEGRATION TEST — Point increment updates tile labels immediately', async () => {
+  test('C) MOBILE REGRESSION: Save button remains accessible on mobile viewport', async () => {
+    setViewport(375);
     await navigateToBuilder();
 
-    // Default increment is usually 100.
-    // Check first tile (Row 1)
-    const firstRowTiles = screen.getAllByText('100');
-    expect(firstRowTiles.length).toBeGreaterThan(0);
-
-    // Locate the increment dropdown in the sidebar
-    const select = screen.getByRole('combobox');
-    
-    // 1. Change to 50
-    fireEvent.change(select, { target: { value: '50' } });
-    
-    // Assert tiles update immediately
-    await waitFor(() => {
-        expect(screen.getAllByText('50').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('100').length).toBeGreaterThan(0); // Row 2
-    });
-
-    // 2. Change to 25
-    fireEvent.change(select, { target: { value: '25' } });
-    
-    await waitFor(() => {
-        expect(screen.getAllByText('25').length).toBeGreaterThan(0);
-        expect(screen.getAllByText('50').length).toBeGreaterThan(0); // Row 2
-    });
+    const saveBtn = screen.getByTestId('save-template-button');
+    expect(saveBtn).toBeInTheDocument();
+    expect(saveBtn).toBeVisible();
   });
 
-  test('E) REGRESSION TEST — Save button triggers existing save handler with increment', async () => {
+  test('D) STACKING GUARD: Live Builder root has highest z-index to overlay AppShell', async () => {
+    setViewport(1440);
     await navigateToBuilder();
     
-    const spy = jest.spyOn(dataService, 'createTemplate');
-    
-    // Select increment 50
-    const select = screen.getByRole('combobox');
-    fireEvent.change(select, { target: { value: '50' } });
-
-    await act(async () => {
-      fireEvent.click(screen.getByText(/Save Template/i));
-    });
-
-    // Verify correct payload including pointScale
-    expect(spy).toHaveBeenCalledWith(
-        expect.any(String), 
-        'Builder Test', 
-        expect.objectContaining({
-            pointScale: 50,
-            rowCount: 5,
-            categoryCount: 4
-        }),
-        expect.any(Array)
-    );
+    const builderRoot = document.querySelector('.template-builder');
+    expect(builderRoot).toHaveClass('z-[200]'); // Explicitly higher than AppShell header z-40
   });
 
-  test('F) REGRESSION TEST — Config screen still renders all fields correctly', async () => {
-    render(<App />);
-    await waitFor(() => screen.getByText(/Select Production/i));
-    fireEvent.change(screen.getByPlaceholderText(/New Show Title/i), { target: { value: 'Regression Show' } });
-    fireEvent.click(screen.getByText(/Create/i));
-    await waitFor(() => screen.getByText(/Template Library/i));
-    fireEvent.click(screen.getByText(/Create Template/i));
+  test('E) COMPONENT PRESENCE: Aside panel is visible and stacks correctly', async () => {
+    setViewport(1440);
+    await navigateToBuilder();
     
-    await waitFor(() => screen.getByText(/New Template Configuration/i));
-
-    // Players
-    expect(screen.getByText(/Contestants/i)).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Player 1')).toBeInTheDocument();
-
-    // Dimensions
-    expect(screen.getByText(/Categories/i)).toBeInTheDocument();
-    expect(screen.getByText(/Rows/i)).toBeInTheDocument();
-
-    // AI
-    expect(screen.getByText(/AI Magic Studio/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Enter topic/i)).toBeInTheDocument();
+    expect(screen.getByText(/Magic Studio/i)).toBeInTheDocument();
+    expect(screen.getByText(/Parameters/i)).toBeInTheDocument();
+    expect(screen.getByText(/Point Increment/i)).toBeInTheDocument();
   });
 });

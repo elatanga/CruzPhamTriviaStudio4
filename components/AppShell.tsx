@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { LogOut, Volume2, VolumeX, Sliders, HelpCircle, Keyboard, ChevronUp, ChevronDown } from 'lucide-react';
 import { soundService } from '../services/soundService';
@@ -109,8 +110,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children, activeShowTitle, u
         </div>
       )}
 
-      {/* CONTENT: Flex Grow, Scrollable on Mobile, Fixed on Desktop */}
-      <main className="flex-1 relative z-10 flex flex-col min-h-0 lg:overflow-hidden bg-black/50">
+      {/* CONTENT: Flex Grow, Scrollable on Mobile, Fixed on Desktop. Removed z-10 to fix child stacking contexts. */}
+      <main className="flex-1 relative flex flex-col min-h-0 lg:overflow-hidden bg-black/50">
         {children}
       </main>
 

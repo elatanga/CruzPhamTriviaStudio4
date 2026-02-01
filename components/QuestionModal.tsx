@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Check, ShieldAlert, Monitor, ArrowLeft, Trash2, Trophy, Clock } from 'lucide-react';
 import { Question, Player, GameTimer } from '../types';
@@ -11,10 +12,11 @@ interface Props {
   timer: GameTimer;
   onClose: (action: 'return' | 'void' | 'award' | 'steal', playerId?: string) => void;
   onReveal: () => void;
+  onTimerEnd?: () => void;
 }
 
 export const QuestionModal: React.FC<Props> = ({ 
-  question, categoryTitle, players, selectedPlayerId, timer, onClose, onReveal 
+  question, categoryTitle, players, selectedPlayerId, timer, onClose, onReveal, onTimerEnd 
 }) => {
   const [showStealSelect, setShowStealSelect] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
@@ -38,9 +40,10 @@ export const QuestionModal: React.FC<Props> = ({
          if (remaining > 0 && remaining <= 5 && remaining !== prevTimeLeft.current) {
             soundService.playTimerTick();
          }
-         // End Sound
+         // End Sound + Event
          if (remaining === 0 && prevTimeLeft.current !== 0 && prevTimeLeft.current !== null) {
             soundService.playTimerAlarm();
+            if (onTimerEnd) onTimerEnd();
          }
          prevTimeLeft.current = remaining;
        } else if (timer.endTime && !timer.isRunning && timeLeft === null) {
@@ -57,7 +60,7 @@ export const QuestionModal: React.FC<Props> = ({
     interval = window.setInterval(updateTimer, 200);
 
     return () => clearInterval(interval);
-  }, [timer, timeLeft]);
+  }, [timer, timeLeft, onTimerEnd]);
 
   // Sound effects on mount/update
   useEffect(() => {
@@ -297,7 +300,7 @@ export const QuestionModal: React.FC<Props> = ({
                 disabled={!selectedPlayerId}
                 className="flex flex-col items-center justify-center gap-1 text-green-500 hover:text-green-300 transition-all px-2 md:px-4 py-1.5 md:py-2 rounded-xl hover:bg-green-900/20 group disabled:opacity-30 disabled:grayscale disabled:pointer-events-none"
               >
-                <div className="p-2 md:p-3 bg-green-900/20 border-2 md:border-4 border-green-900 group-hover:bg-green-600 group-hover:text-black group-hover:border-green-500 rounded-full shadow-2xl transition-all scale-105 md:scale-110"><Trophy className="w-4 h-4 md:w-8 md:h-8" /></div>
+                <div className="p-2 md:p-3 bg-green-900/20 border-2 md:border-4 border-green-900 group-hover:bg-green-600 group-hover:text-black group-hover:border-purple-500 rounded-full shadow-2xl transition-all scale-105 md:scale-110"><Trophy className="w-4 h-4 md:w-8 md:h-8" /></div>
                 <span className="text-[8px] md:text-xs font-black uppercase tracking-widest">Award</span>
               </button>
             </div>

@@ -59,18 +59,77 @@ export interface PlayEvent {
   notes?: string;
 }
 
+export type AnalyticsEventType = 
+  | 'SESSION_STARTED' 
+  | 'SESSION_ENDED'
+  | 'TILE_OPENED'
+  | 'ANSWER_REVEALED'
+  | 'POINTS_AWARDED'
+  | 'POINTS_STOLEN'
+  | 'TILE_VOIDED'
+  | 'QUESTION_RETURNED'
+  | 'QUESTION_EDITED'
+  | 'AI_TILE_REPLACE_START'
+  | 'AI_TILE_REPLACE_APPLIED'
+  | 'AI_TILE_REPLACE_FAILED'
+  | 'AI_CATEGORY_REPLACE_START'
+  | 'AI_CATEGORY_REPLACE_APPLIED'
+  | 'AI_CATEGORY_REPLACE_FAILED'
+  | 'PLAYER_ADDED'
+  | 'PLAYER_REMOVED'
+  | 'PLAYER_EDITED'
+  | 'PLAYER_SELECTED'
+  | 'SCORE_ADJUSTED'
+  | 'WILDCARD_USED'
+  | 'WILDCARD_RESET'
+  | 'TIMER_CONFIG_CHANGED'
+  | 'TIMER_STARTED'
+  | 'TIMER_STOPPED'
+  | 'TIMER_RESET'
+  | 'TIMER_FINISHED'
+  | 'VIEW_SETTINGS_CHANGED'
+  | 'CATEGORY_RENAMED';
+
+export interface GameAnalyticsEvent {
+  id: string;
+  ts: number;
+  iso: string;
+  type: AnalyticsEventType;
+  actor?: {
+    role: 'director' | 'system' | 'player';
+    playerId?: string;
+    playerName?: string;
+  };
+  context: {
+    showId?: string;
+    templateId?: string;
+    tileId?: string;
+    categoryIndex?: number;
+    rowIndex?: number;
+    categoryName?: string;
+    points?: number;
+    playerName?: string;
+    delta?: number;
+    before?: any;
+    after?: any;
+    message?: string;
+    note?: string;
+  };
+}
+
 export interface GameState {
   showTitle: string;
   isGameStarted: boolean;
   categories: Category[];
   players: Player[];
-  activeQuestionId: string | null;
-  activeCategoryId: string | null;
-  selectedPlayerId: string | null;
+  activeQuestionId: null | string;
+  activeCategoryId: null | string;
+  selectedPlayerId: null | string;
   history: string[];
   timer: GameTimer;
   viewSettings: BoardViewSettings;
   lastPlays: PlayEvent[];
+  events: GameAnalyticsEvent[]; // Real-time session events
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';

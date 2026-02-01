@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppShell } from './components/AppShell';
 import { ToastContainer } from './components/Toast';
@@ -13,9 +14,10 @@ import { AdminPanel } from './components/AdminPanel';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { authService } from './services/authService';
 import { dataService } from './services/dataService';
-import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session, BoardViewSettings, PlayEvent } from './types';
+import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session, BoardViewSettings, PlayEvent, AnalyticsEventType, GameAnalyticsEvent } from './types';
 import { soundService } from './services/soundService';
 import { logger } from './services/logger';
+import { normalizePlayerName } from './services/utils';
 import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -36,6 +38,7 @@ const App: React.FC = () => {
 
   // --- MODALS ---
   const [showEndGameConfirm, setShowEndGameConfirm] = useState(false);
+  const [editingTemplateStatus, setEditingTemplateStatus] = useState(false); // Track if builder is open
 
   // --- ADMIN NOTIFICATIONS ---
   const [pendingRequests, setPendingRequests] = useState(0);
@@ -61,7 +64,8 @@ const App: React.FC = () => {
       scoreboardScale: 1.0,
       updatedAt: new Date().toISOString()
     },
-    lastPlays: []
+    lastPlays: [],
+    events: []
   });
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -82,6 +86,42 @@ const App: React.FC = () => {
     localStorage.setItem('cruzpham_gamestate', JSON.stringify(state));
     setGameState(state);
   };
+
+  // --- ANALYTICS EVENT EMITTER (CANONICAL LOG BUS) ---
+  const emitGameEvent = useCallback((type: AnalyticsEventType, payload: Partial<GameAnalyticsEvent>) => {
+    try {
+      const ts = Date.now();
+      const iso = new Date(ts).toISOString();
+      const id = crypto.randomUUID();
+      
+      const newEvent: GameAnalyticsEvent = {
+        id,
+        ts,
+        iso,
+        type,
+        actor: payload.actor || { role: 'system' },
+        context: payload.context || {}
+      };
+
+      // Ensure names in context are normalized for the log
+      if (newEvent.context.playerName) {
+        newEvent.context.playerName = normalizePlayerName(newEvent.context.playerName);
+      }
+
+      logger.info("log_event_append", { type, ts: iso });
+
+      setGameState(prev => {
+        const updatedEvents = [...(prev.events || []), newEvent];
+        // Retain last 1000 events in memory
+        const cappedEvents = updatedEvents.slice(-1000);
+        const newState = { ...prev, events: cappedEvents };
+        localStorage.setItem('cruzpham_gamestate', JSON.stringify(newState));
+        return newState;
+      });
+    } catch (e: any) {
+      logger.error("log_event_failed", { type, message: e.message, ts: new Date().toISOString() });
+    }
+  }, []);
 
   const handleStorageChange = useCallback((e: StorageEvent) => {
     if (e.key === 'cruzpham_gamestate' && e.newValue) {
@@ -129,6 +169,11 @@ const App: React.FC = () => {
         const newId = state.players[newIdx].id;
         if (newId !== state.selectedPlayerId) {
           soundService.playSelect();
+          const targetPlayer = state.players[newIdx];
+          emitGameEvent('PLAYER_SELECTED', {
+             actor: { role: 'director' },
+             context: { playerId: targetPlayer.id, playerName: targetPlayer.name }
+          });
           saveGameState({ ...state, selectedPlayerId: newId });
         }
         return;
@@ -138,6 +183,13 @@ const App: React.FC = () => {
          if (!state.selectedPlayerId) return;
          const delta = (e.key === '=' || e.key === '+') ? 100 : -100;
          soundService.playClick();
+         const targetPlayer = state.players.find(p => p.id === state.selectedPlayerId);
+         if (targetPlayer) {
+           emitGameEvent('SCORE_ADJUSTED', {
+              actor: { role: 'director' },
+              context: { playerName: targetPlayer.name, playerId: targetPlayer.id, delta, note: 'shortcut adjustment' }
+           });
+         }
          saveGameState({
            ...state,
            players: state.players.map(p => p.id === state.selectedPlayerId ? { ...p, score: p.score + delta } : p)
@@ -147,7 +199,7 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
+  }, [emitGameEvent]);
 
   // Admin Polling
   useEffect(() => {
@@ -219,6 +271,9 @@ const App: React.FC = () => {
            }
            if (!parsed.lastPlays) {
              parsed.lastPlays = [];
+           }
+           if (!parsed.events) {
+             parsed.events = [];
            }
            setGameState(parsed);
            if (parsed.showTitle && !activeShow) {
@@ -313,12 +368,12 @@ const App: React.FC = () => {
     });
 
     const initPlayers: Player[] = (template.config.playerNames || []).map(name => ({
-      id: crypto.randomUUID(), name, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0
+      id: crypto.randomUUID(), name: normalizePlayerName(name), score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0
     }));
 
     if (initPlayers.length === 0 && template.config.playerCount > 0) {
       for (let i = 0; i < template.config.playerCount; i++) {
-        initPlayers.push({ id: crypto.randomUUID(), name: `Player ${i + 1}`, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0 });
+        initPlayers.push({ id: crypto.randomUUID(), name: `PLAYER ${i + 1}`, score: 0, color: '#ffffff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0 });
       }
     }
 
@@ -334,14 +389,28 @@ const App: React.FC = () => {
       history: [`Started: ${template.topic}`],
       timer: { duration: 30, endTime: null, isRunning: false },
       viewSettings: gameState.viewSettings || { boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, updatedAt: new Date().toISOString() },
-      lastPlays: []
+      lastPlays: [],
+      events: [] // Reset events for new session
     };
+
     saveGameState(newState);
+
+    emitGameEvent('SESSION_STARTED', { 
+       actor: { role: 'director' },
+       context: { showId: activeShow?.id, templateId: template.id, note: `Game started: ${template.topic}` }
+    });
+
     if (viewMode !== 'BOARD') setViewMode('BOARD');
   };
 
   const handleEndGame = () => {
     if (isDirectorPoppedOut) handleBringBack();
+    
+    emitGameEvent('SESSION_ENDED', { 
+      actor: { role: 'director' },
+      context: { note: 'Game session closed manually' }
+    });
+
     const newState: GameState = {
       ...gameState,
       isGameStarted: false,
@@ -349,6 +418,7 @@ const App: React.FC = () => {
       activeCategoryId: null,
       timer: { ...gameState.timer, endTime: null, isRunning: false },
       lastPlays: []
+      // We keep events in memory for download stability
     };
     saveGameState(newState);
     setViewMode('BOARD');
@@ -357,6 +427,14 @@ const App: React.FC = () => {
   };
 
   const handleSelectQuestion = (catId: string, qId: string) => {
+    const cat = gameState.categories.find(c => c.id === catId);
+    const q = cat?.questions.find(qu => qu.id === qId);
+    
+    emitGameEvent('TILE_OPENED', {
+       actor: { role: 'director' },
+       context: { tileId: qId, categoryName: cat?.title, points: q?.points }
+    });
+    
     saveGameState({ ...gameState, activeCategoryId: catId, activeQuestionId: qId });
   };
 
@@ -368,14 +446,26 @@ const App: React.FC = () => {
     const activeQ = activeCat?.questions[qIdx];
 
     if (!activeCat || !activeQ) {
-       // Emergency escape if metadata is missing, close the modal at least
        saveGameState({ ...current, activeQuestionId: null, activeCategoryId: null });
        return;
     }
 
-    logger.info("question_close_action", { action, qId: activeQ.id, targetPlayerId });
-
     const points = (activeQ.isDoubleOrNothing ? activeQ.points * 2 : activeQ.points);
+
+    // LOG ANALYTICS (CANONICAL BUS)
+    const tileCtx = { tileId: activeQ.id, categoryName: activeCat.title, points: activeQ.points, categoryIndex: catIdx, rowIndex: qIdx };
+    if (action === 'award' && targetPlayerId) {
+       const p = current.players.find(pl => pl.id === targetPlayerId);
+       emitGameEvent('POINTS_AWARDED', { actor: { role: 'director' }, context: { ...tileCtx, playerName: p?.name, delta: points } });
+    } else if (action === 'steal' && targetPlayerId) {
+       const stealer = current.players.find(pl => pl.id === targetPlayerId);
+       const victim = current.players.find(pl => pl.id === current.selectedPlayerId);
+       emitGameEvent('POINTS_STOLEN', { actor: { role: 'director' }, context: { ...tileCtx, playerName: stealer?.name, delta: points, note: `Stolen from ${victim?.name}` } });
+    } else if (action === 'void') {
+       emitGameEvent('TILE_VOIDED', { actor: { role: 'director' }, context: { ...tileCtx, note: 'Question voided by producer' } });
+    } else if (action === 'return') {
+       emitGameEvent('QUESTION_RETURNED', { actor: { role: 'director' }, context: { ...tileCtx } });
+    }
 
     const newCategories = current.categories.map(c => {
       if (c.id !== current.activeCategoryId) return c;
@@ -403,24 +493,15 @@ const App: React.FC = () => {
         if (p.id === targetPlayerId) {
           const isSteal = action === 'steal';
           const newStealsCount = isSteal ? (p.stealsCount || 0) + 1 : (p.stealsCount || 0);
-          
-          if (isSteal) {
-            stealerPlayerName = p.name;
-          } else {
-            awardedPlayerName = p.name;
-          }
-
-          return { 
-            ...p, 
-            score: p.score + points,
-            stealsCount: newStealsCount
-          };
+          if (isSteal) stealerPlayerName = p.name;
+          else awardedPlayerName = p.name;
+          return { ...p, score: p.score + points, stealsCount: newStealsCount };
         }
         return p;
       });
     }
 
-    // --- PLAY LOGGING (RESILIENT) ---
+    // "LAST 4 PLAYS" REAL-TIME LOG (RING BUFFER)
     let updatedPlays = current.lastPlays || [];
     try {
       const playEvent: PlayEvent = {
@@ -443,11 +524,29 @@ const App: React.FC = () => {
         notes: activeQ.isDoubleOrNothing ? 'Double or Nothing Applied' : undefined
       };
 
+      // Ring Buffer: newest first, max 4
       updatedPlays = [playEvent, ...updatedPlays].slice(0, 4);
-      logger.info("game_play_event", { ...playEvent });
+
+      // Safe App Logging
+      logger.info("game_play_event", {
+        atIso: playEvent.atIso,
+        atMs: playEvent.atMs,
+        action: playEvent.action,
+        tileId: playEvent.tileId,
+        categoryName: playEvent.categoryName,
+        basePoints: playEvent.basePoints,
+        effectivePoints: playEvent.effectivePoints,
+        attemptedPlayerName: playEvent.attemptedPlayerName,
+        awardedPlayerName: playEvent.awardedPlayerName,
+        stealerPlayerName: playEvent.stealerPlayerName
+      });
     } catch (err: any) {
-      logger.error("game_play_event_construction_failed", { action, tileId: activeQ.id, message: err.message });
-      // Non-blocking: continue without the log record
+      logger.error("game_play_event_failed", { 
+        atIso: new Date().toISOString(), 
+        action, 
+        tileId: activeQ.id, 
+        message: err.message 
+      });
     }
 
     const newState: GameState = {
@@ -459,9 +558,8 @@ const App: React.FC = () => {
       timer: { ...current.timer, endTime: null, isRunning: false },
       lastPlays: updatedPlays
     };
-    
     saveGameState(newState);
-    
+
     if ((action === 'award' || action === 'steal') && targetPlayerId) {
       const name = newPlayers.find(p => p.id === targetPlayerId)?.name || 'Unknown';
       addToast('success', `${points} Points to ${name} ${action === 'steal' ? '(Steal!)' : ''}`);
@@ -469,50 +567,53 @@ const App: React.FC = () => {
   };
 
   const handleAddPlayer = (name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed || trimmed.length < 2) return;
-    
-    logger.info("player_add_attempt", { name: trimmed });
-
-    if (gameState.players.length >= 8) {
-      addToast('error', 'Maximum 8 players allowed.');
-      logger.warn("player_add_failed", { reason: "LIMIT_REACHED", message: "Max players 8" });
+    const finalName = normalizePlayerName(name);
+    if (!finalName || finalName.length < 2) {
+      addToast('error', 'ENTER PLAYER NAME');
+      logger.warn('player_add_skipped_empty_name', { input: name });
       return;
     }
 
-    let finalName = trimmed;
-    let count = 2;
-    const existingNames = gameState.players.map(p => p.name.toLowerCase());
-    while (existingNames.includes(finalName.toLowerCase())) {
-      finalName = `${trimmed} ${count}`;
-      count++;
+    if (gameState.players.length >= 8) {
+      addToast('error', 'Maximum 8 players allowed.');
+      return;
     }
 
-    const newPlayer: Player = { 
-      id: crypto.randomUUID(), 
-      name: finalName, 
-      score: 0, 
-      color: '#fff', 
-      wildcardsUsed: 0, 
-      wildcardActive: false, 
-      stealsCount: 0 
-    };
-
-    logger.info("player_add_success", { playerId: newPlayer.id, name: finalName, totalPlayers: gameState.players.length + 1 });
+    let uniqueName = finalName;
+    let count = 2;
+    const existingNames = gameState.players.map(p => p.name.toUpperCase());
+    while (existingNames.includes(uniqueName)) {
+      uniqueName = `${finalName} ${count}`;
+      count++;
+    }
+    const newPlayer: Player = { id: crypto.randomUUID(), name: uniqueName, score: 0, color: '#fff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0 };
     
-    saveGameState({ 
-      ...gameState, 
-      players: [...gameState.players, newPlayer],
-      selectedPlayerId: gameState.selectedPlayerId || newPlayer.id 
+    emitGameEvent('PLAYER_ADDED', {
+      actor: { role: 'director' },
+      context: { playerName: uniqueName, playerId: newPlayer.id, note: 'Contestant joined via Quick Entry' }
     });
+
+    saveGameState({ ...gameState, players: [...gameState.players, newPlayer], selectedPlayerId: gameState.selectedPlayerId || newPlayer.id });
   };
 
   const handleUpdateScore = (playerId: string, delta: number) => {
+    const p = gameState.players.find(pl => pl.id === playerId);
+    if (p) {
+      emitGameEvent('SCORE_ADJUSTED', {
+         actor: { role: 'director' },
+         context: { playerName: p.name, playerId, delta, note: 'Manual score adjustment' }
+      });
+    }
     saveGameState({ ...gameState, players: gameState.players.map(p => p.id === playerId ? { ...p, score: p.score + delta } : p) });
   };
 
   const handleSelectPlayer = (id: string) => {
+    const p = gameState.players.find(pl => pl.id === id);
     soundService.playSelect();
+    emitGameEvent('PLAYER_SELECTED', {
+       actor: { role: 'director' },
+       context: { playerId: id, playerName: p?.name }
+    });
     saveGameState({ ...gameState, selectedPlayerId: id });
   };
 
@@ -552,7 +653,7 @@ const App: React.FC = () => {
     if (!session) return <div className="p-8 text-center text-white">Authentication required.</div>;
     return (
       <div className="h-screen w-screen bg-zinc-950 text-white overflow-hidden">
-        <DirectorPanel gameState={gameState} onUpdateState={saveGameState} addToast={addToast} />
+        <DirectorPanel gameState={gameState} onUpdateState={saveGameState} emitGameEvent={emitGameEvent} addToast={addToast} />
         <ToastContainer toasts={toasts} removeToast={removeToast} />
       </div>
     );
@@ -595,10 +696,17 @@ const App: React.FC = () => {
                    </div>
                  </div>
                )}
-               <div className="flex-1 relative overflow-hidden lg:h-full">
+               <div className={`flex-1 relative overflow-hidden lg:h-full transition-all duration-300 ${editingTemplateStatus ? 'z-[100]' : ''}`}>
                  <div className={`absolute inset-0 transition-opacity duration-300 ${viewMode === 'BOARD' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
                     {!gameState.isGameStarted ? (
-                      <TemplateDashboard show={activeShow} onSwitchShow={() => setActiveShow(null)} onPlayTemplate={handlePlayTemplate} addToast={addToast} onLogout={handleLogout} />
+                      <TemplateDashboard 
+                        show={activeShow} 
+                        onSwitchShow={() => setActiveShow(null)} 
+                        onPlayTemplate={handlePlayTemplate} 
+                        addToast={addToast} 
+                        onLogout={handleLogout}
+                        onBuilderToggle={(isOpen: boolean) => setEditingTemplateStatus(isOpen)}
+                      />
                     ) : (
                       <div className="flex flex-col md:flex-row h-full w-full overflow-y-auto lg:overflow-hidden lg:h-full bg-gradient-to-b from-[#F7F3EA] to-[#EFE7D8]">
                         <div className="flex-1 order-2 md:order-1 h-full lg:overflow-hidden relative flex flex-col min-w-0">
@@ -613,15 +721,21 @@ const App: React.FC = () => {
                         </div>
                         {activeQuestion && activeCategory && (
                           <QuestionModal question={activeQuestion} categoryTitle={activeCategory.title} players={gameState.players} selectedPlayerId={gameState.selectedPlayerId} timer={gameState.timer} onClose={handleQuestionClose} onReveal={() => {
+                              emitGameEvent('ANSWER_REVEALED', {
+                                actor: { role: 'director' },
+                                context: { tileId: activeQuestion.id, points: activeQuestion.points, categoryName: activeCategory.title }
+                              });
                               const newState = { ...gameState, categories: gameState.categories.map(c => c.id === gameState.activeCategoryId ? { ...c, questions: c.questions.map(q => q.id === gameState.activeQuestionId ? { ...q, isRevealed: true } : q) } : c) };
                               saveGameState(newState);
+                          }} onTimerEnd={() => {
+                              emitGameEvent('TIMER_FINISHED', { actor: { role: 'system' }, context: { tileId: activeQuestion.id, points: activeQuestion.points } });
                           }} />
                         )}
                       </div>
                     )}
                  </div>
                  <div className={`absolute inset-0 transition-opacity duration-300 bg-zinc-950 ${viewMode === 'DIRECTOR' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-                   <DirectorPanel gameState={gameState} onUpdateState={saveGameState} onPopout={handlePopout} isPoppedOut={isDirectorPoppedOut} onBringBack={handleBringBack} addToast={addToast} onClose={() => setViewMode('BOARD')} />
+                   <DirectorPanel gameState={gameState} onUpdateState={saveGameState} emitGameEvent={emitGameEvent} onPopout={handlePopout} isPoppedOut={isDirectorPoppedOut} onBringBack={handleBringBack} addToast={addToast} onClose={() => setViewMode('BOARD')} />
                  </div>
                  {viewMode === 'ADMIN' && <div className="absolute inset-0 z-50 bg-zinc-950"><AdminPanel currentUser={session.username} onClose={() => setViewMode('BOARD')} addToast={addToast} /></div>}
                </div>

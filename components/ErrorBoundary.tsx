@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { logger } from '../services/logger';
 
 interface Props {
@@ -13,17 +14,13 @@ interface State {
 /**
  * ErrorBoundary component to catch and handle uncaught errors in the React component tree.
  */
-// Fix: Use React.Component explicitly to ensure inheritance of props, state, and setState is properly handled by TypeScript.
-export class ErrorBoundary extends React.Component<Props, State> {
-  // Fix: Explicitly initialize state as a class property for better type inference.
+// Fix: Explicitly extending Component from 'react' to ensure TypeScript correctly resolves inherited members like setState and props.
+export class ErrorBoundary extends Component<Props, State> {
+  // Explicitly initialize state property.
   public state: State = {
     hasError: false,
     error: null
   };
-
-  constructor(props: Props) {
-    super(props);
-  }
 
   public static getDerivedStateFromError(error: Error): State {
     // Update state so the next render shows the fallback UI.
@@ -37,13 +34,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   public handleReset = () => {
     // Resetting error state and performing a hard reload to attempt recovery.
-    // Fix: setState is correctly inherited from React.Component base class
+    // Fix: setState is now correctly recognized as inherited from the Component base class.
     this.setState({ hasError: false, error: null });
     window.location.reload();
   };
 
-  public render() {
-    // Fix: state is correctly inherited from React.Component base class
+  public render(): ReactNode {
+    // Fix: Accessing state inherited from Component base class.
     if (this.state.hasError) {
       // Render fallback studio failure UI.
       return (
@@ -72,7 +69,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       );
     }
 
-    // Fix: props is correctly inherited from React.Component base class
+    // Fix: props.children is now correctly recognized as inherited from the Component base class.
     return this.props.children;
   }
 }

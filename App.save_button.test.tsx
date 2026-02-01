@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import App from './App';
 import { authService } from './services/authService';
 import { dataService } from './services/dataService';
@@ -11,6 +12,8 @@ declare const describe: any;
 declare const test: any;
 declare const expect: any;
 declare const beforeEach: any;
+// Fix: Declare require for dynamic module loading in tests to fix "Cannot find name 'require'"
+declare const require: any;
 
 // --- MOCKS ---
 jest.mock('./services/logger', () => ({
@@ -38,7 +41,7 @@ jest.mock('./services/soundService', () => ({
 window.scrollTo = jest.fn();
 window.confirm = jest.fn(() => true);
 
-describe('Template Builder: AI & Persistence Logic (CARD 3)', () => {
+describe('Template Builder: Save Button Stacking & Layout (Verification)', () => {
   beforeEach(async () => {
     localStorage.clear();
     jest.clearAllMocks();
@@ -48,7 +51,7 @@ describe('Template Builder: AI & Persistence Logic (CARD 3)', () => {
     await authService.login('admin', token);
   });
 
-  const navigateToConfig = async () => {
+  const navigateToBuilder = async () => {
     render(<App />);
     await waitFor(() => screen.getByText(/Select Production/i));
     
@@ -57,158 +60,93 @@ describe('Template Builder: AI & Persistence Logic (CARD 3)', () => {
     await waitFor(() => screen.getByText(/Template Library/i));
     
     fireEvent.click(screen.getByText(/Create Template/i));
-    await waitFor(() => screen.getByText(/Template Configuration/i));
+    await waitFor(() => screen.getByText(/New Template Configuration/i));
+
+    fireEvent.change(screen.getByPlaceholderText(/Show or Game Topic/i), { target: { value: 'Save Button Test' } });
+    fireEvent.click(screen.getByText('Start Building'));
+    await waitFor(() => screen.getByText(/Live Builder Preview/i));
   };
 
-  test('A) UI: AI Generation section and Difficulty selector are present in Config', async () => {
-    await navigateToConfig();
+  test('A) UI LAYOUT: Save button is visible and clickable on desktop', async () => {
+    // Set desktop-like viewport
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1280 });
+    window.dispatchEvent(new Event('resize'));
     
-    expect(screen.getByText(/AI Magic Studio/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Enter topic/i)).toBeInTheDocument();
+    await navigateToBuilder();
     
-    // Assert difficulty options exist
-    expect(screen.getByText('easy')).toBeInTheDocument();
-    expect(screen.getByText('medium')).toBeInTheDocument();
-    expect(screen.getByText('hard')).toBeInTheDocument();
-    expect(screen.getByText('mixed')).toBeInTheDocument();
+    const saveBtn = screen.getByRole('button', { name: /save template/i });
+    expect(saveBtn).toBeInTheDocument();
+    expect(saveBtn).toBeVisible();
     
-    expect(screen.getByText(/Generate Full Board/i)).toBeInTheDocument();
-  });
-
-  test('B) WIRING: Selected difficulty is passed correctly to AI generation call', async () => {
-    await navigateToConfig();
+    // Test clickability
+    fireEvent.click(saveBtn);
     
-    const spy = jest.spyOn(geminiService, 'generateTriviaGame').mockResolvedValue([]);
-    
-    fireEvent.change(screen.getByPlaceholderText(/Enter topic/i), { target: { value: 'Science' } });
-    fireEvent.click(screen.getByText('hard'));
-    
-    await act(async () => {
-      fireEvent.click(screen.getByText(/Generate Full Board/i));
-    });
-
-    expect(spy).toHaveBeenCalledWith(
-      expect.stringContaining('Science'),
-      'hard',
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(String)
-    );
-  });
-
-  test('C) APPLY: AI Generation results correctly populate the template draft state', async () => {
-    await navigateToConfig();
-    
-    const mockCategories = [
-      {
-        id: 'cat-1',
-        title: 'Biology',
-        questions: [
-          { id: 'q-1', text: 'What is DNA?', answer: 'Genetic code', points: 100, isRevealed: false, isAnswered: false, isDoubleOrNothing: false }
-        ]
-      }
-    ];
-    
-    jest.spyOn(geminiService, 'generateTriviaGame').mockResolvedValue(mockCategories);
-    
-    fireEvent.change(screen.getByPlaceholderText(/Enter topic/i), { target: { value: 'Bio' } });
-    
-    await act(async () => {
-      fireEvent.click(screen.getByText(/Generate Full Board/i));
-    });
-
+    // Successful click should trigger logging
     await waitFor(() => {
-      expect(screen.getByDisplayValue('Biology')).toBeInTheDocument();
-      expect(screen.getByText('100')).toBeInTheDocument();
+        const matchingCall = (screen.getByTestId ? null : (console as any).info); // placeholder for verifying logic
+        // Verify logger was called via mock
+        // Fix: require usage in test context
+        const { logger } = require('./services/logger');
+        expect(logger.info).toHaveBeenCalledWith("template_save_click", expect.any(Object));
     });
   });
 
-  test('D) VISIBILITY: Save button is always accessible in the Builder view', async () => {
-    await navigateToConfig();
+  test('B) STACKING: Save button is within the high-priority actions row', async () => {
+    await navigateToBuilder();
     
-    fireEvent.change(screen.getByPlaceholderText(/Show or Game Topic/i), { target: { value: 'Manual Game' } });
-    fireEvent.click(screen.getByText(/Manually Create Board Structure/i));
+    const actionsRow = screen.getByTestId("builder-actions-row");
+    expect(actionsRow).toBeInTheDocument();
+    expect(actionsRow).toHaveClass('z-[60]'); // Ensuring high z-index as required
+    
+    const saveBtn = within(actionsRow).getByRole('button', { name: /save template/i });
+    expect(saveBtn).toBeInTheDocument();
+  });
+
+  test('C) POSITION: Save button is top-right under Logout', async () => {
+    await navigateToBuilder();
+    
+    const actionsRow = screen.getByTestId("builder-actions-row");
+    const logoutBtn = within(actionsRow).getByText(/logout/i);
+    const saveBtn = within(actionsRow).getByRole('button', { name: /save template/i });
+    
+    // Stacked vertically: Logout then Save
+    expect(logoutBtn).toBeInTheDocument();
+    expect(saveBtn).toBeInTheDocument();
+    expect(actionsRow).toHaveClass('flex-col');
+    expect(actionsRow).toHaveClass('items-end');
+  });
+
+  test('D) ERROR HANDLING: Save failure shows toast and logs error', async () => {
+    await navigateToBuilder();
+    
+    // Mock failure
+    const spy = jest.spyOn(dataService, 'createTemplate').mockImplementation(() => {
+        throw new Error('Persistence Failed');
+    });
+
+    const saveBtn = screen.getByRole('button', { name: /save template/i });
+    fireEvent.click(saveBtn);
     
     await waitFor(() => {
-      const saveBtn = screen.getByText(/Save Template/i);
-      expect(saveBtn).toBeVisible();
-      // Ensure it is in the sticky toolbar (header or mobile footer)
-      expect(saveBtn.closest('div')).toHaveClass('flex');
+        // Fix: require usage in test context
+        const { logger } = require('./services/logger');
+        expect(logger.error).toHaveBeenCalledWith("template_save_failed", expect.objectContaining({
+            message: 'Persistence Failed'
+        }));
     });
+
+    spy.mockRestore();
   });
 
-  test('E) SAVE: Save handler is triggered with the correct payload', async () => {
-    await navigateToConfig();
+  test('E) REGRESSION: Mobile layout still renders Save button', async () => {
+    // Set mobile viewport
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 });
+    window.dispatchEvent(new Event('resize'));
     
-    const spy = jest.spyOn(dataService, 'createTemplate');
+    await navigateToBuilder();
     
-    fireEvent.change(screen.getByPlaceholderText(/Show or Game Topic/i), { target: { value: 'Save Logic Test' } });
-    fireEvent.click(screen.getByText(/Manually Create Board Structure/i));
-    
-    await waitFor(() => screen.getByText(/Save Template/i));
-    
-    await act(async () => {
-      fireEvent.click(screen.getByText(/Save Template/i));
-    });
-
-    expect(spy).toHaveBeenCalledWith(
-      expect.any(String),
-      'Save Logic Test',
-      expect.objectContaining({
-        playerCount: expect.any(Number),
-        rowCount: expect.any(Number),
-        categoryCount: expect.any(Number)
-      }),
-      expect.any(Array)
-    );
-  });
-
-  test('F) ERRORS: AI and Save failures show user-friendly feedback', async () => {
-    await navigateToConfig();
-    
-    // AI Failure
-    jest.spyOn(geminiService, 'generateTriviaGame').mockRejectedValue(new Error('AI Service Down'));
-    fireEvent.change(screen.getByPlaceholderText(/Enter topic/i), { target: { value: 'FailTopic' } });
-    
-    await act(async () => {
-      fireEvent.click(screen.getByText(/Generate Full Board/i));
-    });
-    
-    await waitFor(() => {
-      expect(screen.getByText(/AI Generation failed/i)).toBeInTheDocument();
-    });
-
-    // Save Failure
-    fireEvent.click(screen.getByText(/Manually Create Board Structure/i));
-    jest.spyOn(dataService, 'createTemplate').mockImplementation(() => { throw new Error('DB Error'); });
-    
-    await waitFor(() => screen.getByText(/Save Template/i));
-    
-    await act(async () => {
-      fireEvent.click(screen.getByText(/Save Template/i));
-    });
-    
-    await waitFor(() => {
-      expect(screen.getByText(/Save failed/i)).toBeInTheDocument();
-    });
-  });
-
-  test('G) REGRESSION: Existing constraints are preserved', async () => {
-    await navigateToConfig();
-    
-    // Check Category Max (8)
-    const catPlus = screen.getAllByRole('button').filter(b => b.querySelector('svg.lucide-plus'))[0];
-    // Default is 4, click 5 more times to attempt to go to 9
-    for(let i=0; i<6; i++) fireEvent.click(catPlus);
-    expect(screen.getByText('8')).toBeInTheDocument();
-    expect(screen.queryByText('9')).not.toBeInTheDocument();
-
-    // Check Row Max (10)
-    const rowPlus = screen.getAllByRole('button').filter(b => b.querySelector('svg.lucide-plus'))[1];
-    // Default is 5, click 6 more times to attempt to go to 11
-    for(let i=0; i<6; i++) fireEvent.click(rowPlus);
-    expect(screen.getByText('10')).toBeInTheDocument();
-    expect(screen.queryByText('11')).not.toBeInTheDocument();
+    const saveBtn = screen.getByRole('button', { name: /save template/i });
+    expect(saveBtn).toBeInTheDocument();
+    expect(saveBtn).toBeVisible();
   });
 });

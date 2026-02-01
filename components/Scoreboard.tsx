@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Plus, Minus, Maximize2, Minimize2 } from 'lucide-react';
 import { Player, BoardViewSettings } from '../types';
@@ -32,7 +33,7 @@ export const Scoreboard: React.FC<Props> = ({
   const handleAddManual = () => {
     if (newName.trim()) {
       soundService.playClick();
-      onAddPlayer(newName.trim());
+      onAddPlayer(newName);
       setNewName('');
     }
   };
@@ -68,6 +69,7 @@ export const Scoreboard: React.FC<Props> = ({
           const isSelected = p.id === selectedPlayerId;
           const starsCount = p.wildcardsUsed || 0;
           const stealsCount = p.stealsCount || 0;
+          const displayName = (p.name || "").toUpperCase();
 
           return (
             <div 
@@ -88,7 +90,7 @@ export const Scoreboard: React.FC<Props> = ({
                     className={`truncate pr-1 font-roboto font-bold tracking-wide ${isSelected ? 'text-white' : 'text-zinc-400'}`} 
                     style={{ fontSize: `calc(clamp(14px, 1.4vw, 30px) * var(--scoreboard-scale))` }}
                   >
-                    {isCondensed ? p.name.split(' ')[0] : p.name}
+                    {isCondensed ? displayName.split(' ')[0] : displayName}
                   </span>
                   {!isCondensed && starsCount > 0 && (
                     <span 
