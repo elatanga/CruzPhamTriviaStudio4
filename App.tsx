@@ -600,18 +600,16 @@ const App: React.FC = () => {
                     {!gameState.isGameStarted ? (
                       <TemplateDashboard show={activeShow} onSwitchShow={() => setActiveShow(null)} onPlayTemplate={handlePlayTemplate} addToast={addToast} onLogout={handleLogout} />
                     ) : (
-                      <>
-                        <div className="flex flex-col md:flex-row h-full w-full overflow-y-auto lg:overflow-hidden lg:h-full">
-                          <div className="flex-1 order-2 md:order-1 h-full lg:overflow-hidden relative flex flex-col min-w-0">
-                            <div className="flex-none h-12 px-4 flex items-center justify-between border-b border-zinc-800 bg-zinc-950 z-20">
-                              <button onClick={() => { soundService.playClick(); setShowEndGameConfirm(true); }} type="button" className="text-[10px] md:text-xs uppercase text-red-500 hover:text-red-400 font-bold tracking-wider flex items-center gap-2"><Power className="w-3 h-3" /> End Show</button>
-                              <button onClick={() => setViewMode('DIRECTOR')} className="text-[10px] md:text-xs uppercase font-bold text-zinc-400 hover:text-white flex items-center gap-2 px-3 py-1.5 rounded transition-colors"><Grid className="w-3 h-3" /> Director</button>
-                            </div>
-                            <div className="flex-1 relative w-full h-full lg:overflow-hidden"><GameBoard categories={gameState.categories} onSelectQuestion={handleSelectQuestion} viewSettings={gameState.viewSettings} /></div>
+                      <div className="flex flex-col md:flex-row h-full w-full overflow-y-auto lg:overflow-hidden lg:h-full bg-gradient-to-b from-[#F7F3EA] to-[#EFE7D8]">
+                        <div className="flex-1 order-2 md:order-1 h-full lg:overflow-hidden relative flex flex-col min-w-0">
+                          <div className="flex-none h-12 px-4 flex items-center justify-between border-b border-zinc-800/20 bg-white/40 backdrop-blur-md z-20">
+                            <button onClick={() => { soundService.playClick(); setShowEndGameConfirm(true); }} type="button" className="text-[10px] md:text-xs uppercase text-red-500 hover:text-red-600 font-bold tracking-wider flex items-center gap-2"><Power className="w-3 h-3" /> End Show</button>
+                            <button onClick={() => setViewMode('DIRECTOR')} className="text-[10px] md:text-xs uppercase font-bold text-zinc-500 hover:text-zinc-800 flex items-center gap-2 px-3 py-1.5 rounded transition-colors"><Grid className="w-3 h-3" /> Director</button>
                           </div>
-                          <div className="order-1 md:order-2 flex-none h-auto lg:h-full w-full md:w-auto relative z-30">
-                            <Scoreboard players={gameState.players} selectedPlayerId={gameState.selectedPlayerId} onAddPlayer={handleAddPlayer} onUpdateScore={handleUpdateScore} onSelectPlayer={handleSelectPlayer} gameActive={gameState.isGameStarted} viewSettings={gameState.viewSettings} />
-                          </div>
+                          <div className="flex-1 relative w-full h-full lg:overflow-hidden"><GameBoard categories={gameState.categories} onSelectQuestion={handleSelectQuestion} viewSettings={gameState.viewSettings} /></div>
+                        </div>
+                        <div className="order-1 md:order-2 flex-none h-auto lg:h-full w-full md:w-auto relative z-30">
+                          <Scoreboard players={gameState.players} selectedPlayerId={gameState.selectedPlayerId} onAddPlayer={handleAddPlayer} onUpdateScore={handleUpdateScore} onSelectPlayer={handleSelectPlayer} gameActive={gameState.isGameStarted} viewSettings={gameState.viewSettings} />
                         </div>
                         {activeQuestion && activeCategory && (
                           <QuestionModal question={activeQuestion} categoryTitle={activeCategory.title} players={gameState.players} selectedPlayerId={gameState.selectedPlayerId} timer={gameState.timer} onClose={handleQuestionClose} onReveal={() => {
@@ -619,7 +617,7 @@ const App: React.FC = () => {
                               saveGameState(newState);
                           }} />
                         )}
-                      </>
+                      </div>
                     )}
                  </div>
                  <div className={`absolute inset-0 transition-opacity duration-300 bg-zinc-950 ${viewMode === 'DIRECTOR' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>

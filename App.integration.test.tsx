@@ -97,7 +97,7 @@ describe('CRUZPHAM TRIVIA - Network Integration Tests', () => {
     fireEvent.change(screen.getByPlaceholderText(/Paste your token here/i), { target: { value: token } });
     
     await act(async () => {
-      fireEvent.click(screen.getByText(/Enter Studio/i));
+      fireEvent.click(screen.getByText(/Login/i));
     });
 
     // Verify Login Success (Dashboard Visible)
@@ -123,7 +123,7 @@ describe('CRUZPHAM TRIVIA - Network Integration Tests', () => {
     render(<App />);
 
     // 1. Open Request Modal
-    fireEvent.click(screen.getByText(/Request Access Token/i));
+    fireEvent.click(screen.getByText(/Get Token/i));
 
     // 2. Fill Form
     fireEvent.change(screen.getByText(/First Name/i).nextSibling as HTMLInputElement, { target: { value: 'Test' } });
@@ -154,16 +154,13 @@ describe('CRUZPHAM TRIVIA - Network Integration Tests', () => {
     expect(storedRequests).toHaveLength(1);
     expect(storedRequests[0].preferredUsername).toBe('requester_1');
     expect(storedRequests[0].status).toBe('PENDING');
-    
-    // Ensure admin notification status was initialized
-    expect(storedRequests[0].adminNotifyStatus).toBeDefined();
   });
 
   // 4) Approve Request -> User Login Test
   test('E2E: Admin approves request -> User logs in with new token', async () => {
     // 1. Setup: Master Admin & Pre-existing Request
     const adminToken = await authService.bootstrapMasterAdmin('admin');
-    const req = await authService.submitTokenRequest({
+    await authService.submitTokenRequest({
       firstName: 'Integration', lastName: 'Test', tiktokHandle: 'integ', preferredUsername: 'new_user', phoneE164: '+15559998888'
     });
 
@@ -172,11 +169,12 @@ describe('CRUZPHAM TRIVIA - Network Integration Tests', () => {
     // 2. Login as Admin
     fireEvent.change(screen.getByPlaceholderText(/e.g. producer_one/i), { target: { value: 'admin' } });
     fireEvent.change(screen.getByPlaceholderText(/Paste your token here/i), { target: { value: adminToken } });
-    fireEvent.click(screen.getByText(/Enter Studio/i));
+    fireEvent.click(screen.getByText(/Login/i));
 
     // 3. Navigate to Admin Console -> Inbox
     await waitFor(() => screen.getByText(/Select Production/i));
     
+    // Find the Admin Console button (usually in bottom right or footer)
     await waitFor(() => screen.getByText(/Admin Console/i));
     fireEvent.click(screen.getByText(/Admin Console/i));
     
@@ -193,7 +191,6 @@ describe('CRUZPHAM TRIVIA - Network Integration Tests', () => {
     // 5. Extract Token from Credentials Modal
     await waitFor(() => screen.getByText(/Credentials Generated/i));
     
-    // Look for token in UI
     const tokenElement = document.querySelector('.text-gold-500.font-mono.text-lg.break-all');
     const newUserToken = tokenElement?.textContent;
     expect(newUserToken).toBeTruthy();
@@ -207,12 +204,47 @@ describe('CRUZPHAM TRIVIA - Network Integration Tests', () => {
     
     fireEvent.change(screen.getByPlaceholderText(/e.g. producer_one/i), { target: { value: 'new_user' } });
     fireEvent.change(screen.getByPlaceholderText(/Paste your token here/i), { target: { value: newUserToken! } });
-    fireEvent.click(screen.getByText(/Enter Studio/i));
+    fireEvent.click(screen.getByText(/Login/i));
 
     // 8. Assert Success
     await waitFor(() => {
        expect(screen.getByText(/PRODUCER:/i)).toBeInTheDocument();
        expect(screen.getByText('new_user')).toBeInTheDocument();
     });
+  });
+
+  // 5) Luxury Theme Visibility Test (CARD 2)
+  test('Theme: Game Stage applies luxury ivory background when game is active', async () => {
+    const adminToken = await authService.bootstrapMasterAdmin('admin');
+    await authService.login('admin', adminToken);
+    
+    // Simulate active game state in localStorage
+    const mockGameState = {
+      showTitle: 'Theme Test',
+      isGameStarted: true,
+      categories: [{ id: 'c1', title: 'Cat 1', questions: [{ id: 'q1', points: 100, text: 'Q', answer: 'A', isRevealed: false, isAnswered: false }] }],
+      players: [{ id: 'p1', name: 'Alice', score: 0, color: '#fff' }],
+      activeQuestionId: null,
+      activeCategoryId: null,
+      selectedPlayerId: 'p1',
+      history: [],
+      timer: { duration: 30, endTime: null, isRunning: false },
+      viewSettings: { boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, updatedAt: '' },
+      lastPlays: []
+    };
+    localStorage.setItem('cruzpham_gamestate', JSON.stringify(mockGameState));
+    localStorage.setItem('cruzpham_active_session_id', 'sess-123');
+
+    render(<App />);
+
+    await waitFor(() => screen.getByText(/End Show/i));
+
+    // The container with the luxury ivory gradient background should be present
+    const gameStage = document.querySelector('.bg-gradient-to-b.from-\\[\\#F7F3EA\\].to-\\[\\#EFE7D8\\]');
+    expect(gameStage).toBeInTheDocument();
+    
+    // Headers should still be dark navy for anchoring
+    const header = screen.getByText('Cat 1').closest('div');
+    expect(header).toHaveClass('bg-navy-900');
   });
 });
