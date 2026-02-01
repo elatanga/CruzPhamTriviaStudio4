@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppShell } from './components/AppShell';
 import { ToastContainer } from './components/Toast';
@@ -14,7 +13,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { authService } from './services/authService';
 import { dataService } from './services/dataService';
-import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session, BoardViewSettings } from './types';
+import { GameState, Category, Player, ToastMessage, Question, Show, GameTemplate, UserRole, Session, BoardViewSettings, PlayEvent } from './types';
 import { soundService } from './services/soundService';
 import { logger } from './services/logger';
 import { Monitor, Grid, Shield, Copy, Loader2, ExternalLink, Power } from 'lucide-react';
@@ -61,10 +60,22 @@ const App: React.FC = () => {
       tileScale: 1.0,
       scoreboardScale: 1.0,
       updatedAt: new Date().toISOString()
-    }
+    },
+    lastPlays: []
   });
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Layout Logging
+  useEffect(() => {
+    const logLayout = () => {
+      const isCompact = window.innerWidth < 1024;
+      logger.info("layout_mode", { compact: isCompact, width: window.innerWidth, height: window.innerHeight });
+    };
+    logLayout();
+    window.addEventListener('resize', logLayout);
+    return () => window.removeEventListener('resize', logLayout);
+  }, []);
 
   // --- PERSISTENCE & SYNC ---
   const saveGameState = (state: GameState) => {
@@ -206,6 +217,9 @@ const App: React.FC = () => {
            } else if (parsed.viewSettings.scoreboardScale === undefined) {
              parsed.viewSettings.scoreboardScale = 1.0;
            }
+           if (!parsed.lastPlays) {
+             parsed.lastPlays = [];
+           }
            setGameState(parsed);
            if (parsed.showTitle && !activeShow) {
               setActiveShow(prev => prev || { id: 'restored-ghost', userId: 'restored', title: parsed.showTitle, createdAt: '' });
@@ -319,7 +333,8 @@ const App: React.FC = () => {
       selectedPlayerId: initPlayers.length > 0 ? initPlayers[0].id : null,
       history: [`Started: ${template.topic}`],
       timer: { duration: 30, endTime: null, isRunning: false },
-      viewSettings: gameState.viewSettings || { boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, updatedAt: new Date().toISOString() }
+      viewSettings: gameState.viewSettings || { boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, updatedAt: new Date().toISOString() },
+      lastPlays: []
     };
     saveGameState(newState);
     if (viewMode !== 'BOARD') setViewMode('BOARD');
@@ -332,7 +347,8 @@ const App: React.FC = () => {
       isGameStarted: false,
       activeQuestionId: null,
       activeCategoryId: null,
-      timer: { ...gameState.timer, endTime: null, isRunning: false }
+      timer: { ...gameState.timer, endTime: null, isRunning: false },
+      lastPlays: []
     };
     saveGameState(newState);
     setViewMode('BOARD');
@@ -346,9 +362,16 @@ const App: React.FC = () => {
 
   const handleQuestionClose = (action: 'return' | 'void' | 'award' | 'steal', targetPlayerId?: string) => {
     const current = gameStateRef.current;
-    const activeCat = current.categories.find(c => c.id === current.activeCategoryId);
-    const activeQ = activeCat?.questions.find(q => q.id === current.activeQuestionId);
-    if (!activeCat || !activeQ) return;
+    const catIdx = current.categories.findIndex(c => c.id === current.activeCategoryId);
+    const activeCat = current.categories[catIdx];
+    const qIdx = activeCat?.questions.findIndex(q => q.id === current.activeQuestionId);
+    const activeQ = activeCat?.questions[qIdx];
+
+    if (!activeCat || !activeQ) {
+       // Emergency escape if metadata is missing, close the modal at least
+       saveGameState({ ...current, activeQuestionId: null, activeCategoryId: null });
+       return;
+    }
 
     logger.info("question_close_action", { action, qId: activeQ.id, targetPlayerId });
 
@@ -371,15 +394,20 @@ const App: React.FC = () => {
     });
 
     let newPlayers = [...current.players];
+    let awardedPlayerName = '';
+    let stealerPlayerName = '';
+    const attemptedPlayer = current.players.find(p => p.id === current.selectedPlayerId);
+
     if ((action === 'award' || action === 'steal') && targetPlayerId) {
       newPlayers = newPlayers.map(p => {
         if (p.id === targetPlayerId) {
           const isSteal = action === 'steal';
-          // Increment stealsCount ONLY if it is a steal action
           const newStealsCount = isSteal ? (p.stealsCount || 0) + 1 : (p.stealsCount || 0);
           
           if (isSteal) {
-            logger.info("steal_award_applied", { tileId: activeQ.id, stealerPlayerId: targetPlayerId, stealsCount: newStealsCount });
+            stealerPlayerName = p.name;
+          } else {
+            awardedPlayerName = p.name;
           }
 
           return { 
@@ -390,24 +418,88 @@ const App: React.FC = () => {
         }
         return p;
       });
-      addToast('success', `${points} Points to ${newPlayers.find(p => p.id === targetPlayerId)?.name} ${action === 'steal' ? '(Steal!)' : ''}`);
     }
-    
+
+    // --- PLAY LOGGING (RESILIENT) ---
+    let updatedPlays = current.lastPlays || [];
+    try {
+      const playEvent: PlayEvent = {
+        id: `${Date.now()}-${activeQ.id}-${action}`,
+        atIso: new Date().toISOString(),
+        atMs: Date.now(),
+        action: action.toUpperCase() as any,
+        tileId: activeQ.id,
+        categoryIndex: catIdx !== -1 ? catIdx : undefined,
+        categoryName: activeCat.title || 'Unknown Category',
+        rowIndex: qIdx !== -1 ? qIdx : undefined,
+        basePoints: activeQ.points,
+        effectivePoints: (action === 'award' || action === 'steal') ? points : undefined,
+        attemptedPlayerId: attemptedPlayer?.id,
+        attemptedPlayerName: attemptedPlayer?.name || 'Unknown Player',
+        awardedPlayerId: action === 'award' ? targetPlayerId : undefined,
+        awardedPlayerName: action === 'award' ? (awardedPlayerName || 'Unknown Player') : undefined,
+        stealerPlayerId: action === 'steal' ? targetPlayerId : undefined,
+        stealerPlayerName: action === 'steal' ? (stealerPlayerName || 'Unknown Player') : undefined,
+        notes: activeQ.isDoubleOrNothing ? 'Double or Nothing Applied' : undefined
+      };
+
+      updatedPlays = [playEvent, ...updatedPlays].slice(0, 4);
+      logger.info("game_play_event", { ...playEvent });
+    } catch (err: any) {
+      logger.error("game_play_event_construction_failed", { action, tileId: activeQ.id, message: err.message });
+      // Non-blocking: continue without the log record
+    }
+
     const newState: GameState = {
       ...current,
       categories: newCategories,
       players: newPlayers,
       activeQuestionId: null,
       activeCategoryId: null,
-      timer: { ...current.timer, endTime: null, isRunning: false }
+      timer: { ...current.timer, endTime: null, isRunning: false },
+      lastPlays: updatedPlays
     };
     
-    logger.info("action_completed", { action, success: true });
     saveGameState(newState);
+    
+    if ((action === 'award' || action === 'steal') && targetPlayerId) {
+      const name = newPlayers.find(p => p.id === targetPlayerId)?.name || 'Unknown';
+      addToast('success', `${points} Points to ${name} ${action === 'steal' ? '(Steal!)' : ''}`);
+    }
   };
 
   const handleAddPlayer = (name: string) => {
-    const newPlayer: Player = { id: crypto.randomUUID(), name, score: 0, color: '#fff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0 };
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length < 2) return;
+    
+    logger.info("player_add_attempt", { name: trimmed });
+
+    if (gameState.players.length >= 8) {
+      addToast('error', 'Maximum 8 players allowed.');
+      logger.warn("player_add_failed", { reason: "LIMIT_REACHED", message: "Max players 8" });
+      return;
+    }
+
+    let finalName = trimmed;
+    let count = 2;
+    const existingNames = gameState.players.map(p => p.name.toLowerCase());
+    while (existingNames.includes(finalName.toLowerCase())) {
+      finalName = `${trimmed} ${count}`;
+      count++;
+    }
+
+    const newPlayer: Player = { 
+      id: crypto.randomUUID(), 
+      name: finalName, 
+      score: 0, 
+      color: '#fff', 
+      wildcardsUsed: 0, 
+      wildcardActive: false, 
+      stealsCount: 0 
+    };
+
+    logger.info("player_add_success", { playerId: newPlayer.id, name: finalName, totalPlayers: gameState.players.length + 1 });
+    
     saveGameState({ 
       ...gameState, 
       players: [...gameState.players, newPlayer],
@@ -503,21 +595,21 @@ const App: React.FC = () => {
                    </div>
                  </div>
                )}
-               <div className="flex-1 relative overflow-hidden">
+               <div className="flex-1 relative overflow-hidden lg:h-full">
                  <div className={`absolute inset-0 transition-opacity duration-300 ${viewMode === 'BOARD' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
                     {!gameState.isGameStarted ? (
-                      <TemplateDashboard show={activeShow} onSwitchShow={() => setActiveShow(null)} onPlayTemplate={handlePlayTemplate} addToast={addToast} />
+                      <TemplateDashboard show={activeShow} onSwitchShow={() => setActiveShow(null)} onPlayTemplate={handlePlayTemplate} addToast={addToast} onLogout={handleLogout} />
                     ) : (
                       <>
-                        <div className="flex flex-col md:flex-row h-full w-full overflow-hidden">
-                          <div className="flex-1 order-2 md:order-1 h-full overflow-hidden relative flex flex-col min-w-0">
-                            <div className="flex-none h-10 px-4 flex items-center justify-between border-b border-zinc-800 bg-zinc-950 z-20">
-                              <button onClick={() => { soundService.playClick(); setShowEndGameConfirm(true); }} type="button" className="text-xs uppercase text-red-500 hover:text-red-400 font-bold tracking-wider flex items-center gap-2"><Power className="w-3 h-3" /> End Show</button>
-                              <button onClick={() => setViewMode('DIRECTOR')} className="text-xs uppercase font-bold text-zinc-400 hover:text-white flex items-center gap-2 px-3 py-1.5 rounded transition-colors"><Grid className="w-3 h-3" /> Director</button>
+                        <div className="flex flex-col md:flex-row h-full w-full overflow-y-auto lg:overflow-hidden lg:h-full">
+                          <div className="flex-1 order-2 md:order-1 h-full lg:overflow-hidden relative flex flex-col min-w-0">
+                            <div className="flex-none h-12 px-4 flex items-center justify-between border-b border-zinc-800 bg-zinc-950 z-20">
+                              <button onClick={() => { soundService.playClick(); setShowEndGameConfirm(true); }} type="button" className="text-[10px] md:text-xs uppercase text-red-500 hover:text-red-400 font-bold tracking-wider flex items-center gap-2"><Power className="w-3 h-3" /> End Show</button>
+                              <button onClick={() => setViewMode('DIRECTOR')} className="text-[10px] md:text-xs uppercase font-bold text-zinc-400 hover:text-white flex items-center gap-2 px-3 py-1.5 rounded transition-colors"><Grid className="w-3 h-3" /> Director</button>
                             </div>
-                            <div className="flex-1 relative w-full h-full overflow-hidden"><GameBoard categories={gameState.categories} onSelectQuestion={handleSelectQuestion} viewSettings={gameState.viewSettings} /></div>
+                            <div className="flex-1 relative w-full h-full lg:overflow-hidden"><GameBoard categories={gameState.categories} onSelectQuestion={handleSelectQuestion} viewSettings={gameState.viewSettings} /></div>
                           </div>
-                          <div className="order-1 md:order-2 flex-none h-auto md:h-full w-full md:w-auto relative z-30">
+                          <div className="order-1 md:order-2 flex-none h-auto lg:h-full w-full md:w-auto relative z-30">
                             <Scoreboard players={gameState.players} selectedPlayerId={gameState.selectedPlayerId} onAddPlayer={handleAddPlayer} onUpdateScore={handleUpdateScore} onSelectPlayer={handleSelectPlayer} gameActive={gameState.isGameStarted} viewSettings={gameState.viewSettings} />
                           </div>
                         </div>

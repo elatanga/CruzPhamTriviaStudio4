@@ -65,7 +65,7 @@ export const QuestionModal: React.FC<Props> = ({
   }, [isDouble, isRevealed]);
 
   const handleAction = useCallback((action: 'reveal' | 'award' | 'steal' | 'void' | 'return', event?: React.MouseEvent | React.KeyboardEvent) => {
-    // Prevent default and stop propagation to ensure no background form validation is triggered
+    // Prevent default and stop propagation
     if (event) {
       if ('preventDefault' in event) event.preventDefault();
       if ('stopPropagation' in event) event.stopPropagation();
@@ -74,7 +74,7 @@ export const QuestionModal: React.FC<Props> = ({
     // LOCK RULE: Before reveal, only 'reveal' is allowed.
     if (!isRevealed && action !== 'reveal') return;
     
-    if (showStealSelect && action !== 'return') return; // Block other actions if steal menu open
+    if (showStealSelect && action !== 'return') return; 
 
     switch (action) {
       case 'reveal':
@@ -96,10 +96,8 @@ export const QuestionModal: React.FC<Props> = ({
         }
         break;
       case 'void':
-        // HARDENED VOID: Only post-reveal. 
         if (isRevealed) {
-          // Note: Using window.confirm is safe, but we ensure it doesn't collide with browser validation by type="button"
-          if (window.confirm('Mark this question as VOID?\n\nThis will lock the tile and close the view. It can only be reset from the Director Panel.')) {
+          if (window.confirm('Mark this question as VOID?\n\nThis will lock the tile and close the view.')) {
             soundService.playVoid();
             onClose('void');
           }
@@ -118,8 +116,9 @@ export const QuestionModal: React.FC<Props> = ({
   // Keyboard Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      e.stopPropagation(); 
-      
+      const active = document.activeElement;
+      if (active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA') return;
+
       switch (e.code) {
         case 'Space':
           e.preventDefault();
@@ -152,85 +151,85 @@ export const QuestionModal: React.FC<Props> = ({
     <div 
       data-testid="question-modal-root"
       className="fixed inset-0 z-50 flex flex-col bg-black text-white font-sans overflow-hidden animate-in fade-in duration-200"
-      style={{ padding: 'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)' }}
+      style={{ padding: 'env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0' }}
     >
       {/* Background Glow */}
       <div className={`absolute inset-0 opacity-20 transition-colors duration-500 pointer-events-none ${isRevealed ? (isDouble ? 'bg-red-900' : 'bg-gold-900') : 'bg-blue-900'}`} />
 
       {/* TOP: Category + Points */}
-      <div className="flex-none h-16 md:h-20 bg-gold-600 px-6 flex justify-between items-center text-black z-10 shadow-xl">
-        <div className="flex flex-col">
-          <span className="text-[10px] md:text-xs uppercase tracking-widest opacity-80 font-bold">Category</span>
-          <h3 className="font-black uppercase tracking-widest text-lg md:text-2xl truncate max-w-md">
+      <div className="flex-none h-16 md:h-20 bg-gold-600 px-4 md:px-6 flex justify-between items-center text-black z-10 shadow-xl">
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="text-[9px] md:text-xs uppercase tracking-widest opacity-80 font-bold">Category</span>
+          <h3 className="font-black uppercase tracking-widest text-sm md:text-2xl truncate pr-2">
             {categoryTitle}
           </h3>
         </div>
         
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2 md:gap-6 flex-none">
           {isDouble && (
-            <div className="bg-red-700 text-white px-4 py-1 rounded-full animate-pulse border-2 border-red-900">
-               <span className="text-xs md:text-sm font-black tracking-tighter uppercase">DOUBLE OR NOTHING</span>
+            <div className="bg-red-700 text-white px-2 md:px-4 py-0.5 md:py-1 rounded-full animate-pulse border-2 border-red-900 flex-none">
+               <span className="text-[8px] md:text-sm font-black tracking-tighter uppercase whitespace-nowrap">2X POINTS</span>
             </div>
           )}
           <div className="text-right">
-            <span className="text-[10px] md:text-xs uppercase tracking-widest opacity-80 font-bold">Points</span>
-            <div className="text-xl md:text-3xl font-black">{question.points}</div>
+            <span className="text-[9px] md:text-xs uppercase tracking-widest opacity-80 font-bold">Points</span>
+            <div className="text-lg md:text-3xl font-black">{question.points}</div>
           </div>
         </div>
       </div>
 
-      {/* CENTER: Question + Answer */}
-      <div className="flex-1 flex flex-col items-center justify-center text-center p-8 md:p-12 relative z-10">
+      {/* CENTER: Question + Answer (Scrollable for overflow) */}
+      <div className="flex-1 overflow-y-auto relative z-10 flex flex-col items-center justify-center p-6 md:p-12">
         
         {/* TIMER OVERLAY (Floating Top Right) */}
         {timeLeft !== null && (
-           <div className={`absolute top-4 right-4 md:top-8 md:right-8 p-3 rounded-full border-4 font-mono text-2xl md:text-4xl font-black flex items-center justify-center w-20 h-20 md:w-28 md:h-28 transition-colors duration-300 bg-black/80 ${timeLeft <= 5 ? 'border-red-500 text-red-500 animate-pulse' : 'border-gold-500 text-gold-500'}`}>
+           <div className={`absolute top-4 right-4 md:top-8 md:right-8 p-2 rounded-full border-2 md:border-4 font-mono text-xl md:text-4xl font-black flex items-center justify-center w-12 h-12 md:w-28 md:h-28 transition-colors duration-300 bg-black/80 z-20 ${timeLeft <= 5 ? 'border-red-500 text-red-500 animate-pulse' : 'border-gold-500 text-gold-500'}`}>
              {timeLeft}
            </div>
         )}
 
-        {/* Question Text - Extra large and readable for livestream */}
-        <div className="max-w-7xl w-full mb-6 md:mb-10">
+        {/* Question Text */}
+        <div className="max-w-7xl w-full mb-6 md:mb-10 mt-12 md:mt-0">
           <h2 
             data-testid="question-text"
-            className={`leading-[1.15] transition-all duration-500 font-roboto font-bold px-4 ${isRevealed ? 'scale-90 opacity-40' : 'scale-100'}`}
-            style={{ fontSize: 'clamp(34px, 4.8vw, 96px)' }}
+            className={`leading-[1.15] transition-all duration-500 font-roboto font-bold px-2 ${isRevealed ? 'scale-90 opacity-40' : 'scale-100'}`}
+            style={{ fontSize: 'clamp(24px, 4.5vw, 96px)' }}
           >
             {question.text}
           </h2>
         </div>
 
-        {/* Answer Reveal - Large readable font */}
-        <div className="w-full max-w-5xl h-40 md:h-56 flex items-center justify-center">
+        {/* Answer Reveal */}
+        <div className="w-full max-w-5xl min-h-[120px] md:h-56 flex items-center justify-center mb-10">
           {isRevealed ? (
-            <div className="animate-in zoom-in slide-in-from-bottom duration-300 bg-gold-950/50 border-4 border-gold-500 px-10 md:px-20 py-6 md:py-10 rounded-2xl backdrop-blur-md shadow-[0_0_80px_rgba(255,215,0,0.3)]">
+            <div className="animate-in zoom-in slide-in-from-bottom duration-300 bg-gold-950/50 border-2 md:border-4 border-gold-500 px-6 md:px-20 py-4 md:py-10 rounded-2xl backdrop-blur-md shadow-[0_0_80px_rgba(255,215,0,0.3)]">
               <p 
                 data-testid="answer-text"
                 className="text-gold-400 drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)] leading-tight font-roboto font-bold"
-                style={{ fontSize: 'clamp(28px, 4vw, 80px)' }}
+                style={{ fontSize: 'clamp(20px, 3.8vw, 80px)' }}
               >
                 {question.answer}
               </p>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-4 text-zinc-700">
-               <Monitor className="w-16 h-16 md:w-20 md:h-20 opacity-20" />
-               <span className="text-xl md:text-2xl italic opacity-30 font-serif tracking-widest uppercase">Waiting for host...</span>
+            <div className="flex flex-col items-center gap-2 md:gap-4 text-zinc-700">
+               <Monitor className="w-10 h-10 md:w-20 md:h-20 opacity-20" />
+               <span className="text-sm md:text-2xl italic opacity-30 font-serif tracking-widest uppercase">Waiting for host...</span>
             </div>
           )}
         </div>
 
-        {/* Steal Selector Overlay */}
+        {/* Steal Selector Overlay (Absolute covering center) */}
         {showStealSelect && (
-          <div className="absolute inset-0 bg-black/95 z-30 flex flex-col items-center justify-center animate-in fade-in duration-200">
-            <h3 className="text-purple-500 font-black text-3xl md:text-5xl mb-12 uppercase tracking-widest">Select Player to Steal</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-6 w-full max-w-4xl px-8">
+          <div className="absolute inset-0 bg-black/95 z-30 flex flex-col items-center justify-start md:justify-center p-6 animate-in fade-in duration-200 overflow-y-auto">
+            <h3 className="text-purple-500 font-black text-2xl md:text-5xl mb-8 md:mb-12 uppercase tracking-widest mt-8 md:mt-0">Select Stealer</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-6 w-full max-w-4xl px-4 md:px-8 pb-10">
               {players.filter(p => p.id !== selectedPlayerId).map(p => (
                 <button
                   key={p.id}
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onClose('steal', p.id); }}
-                  className="bg-zinc-900 border-4 border-zinc-800 hover:border-purple-500 hover:bg-purple-900/40 p-8 md:p-12 rounded-2xl text-2xl md:text-4xl font-black text-white transition-all transform hover:scale-105 active:scale-95"
+                  className="bg-zinc-900 border-2 md:border-4 border-zinc-800 hover:border-purple-500 hover:bg-purple-900/40 p-4 md:p-12 rounded-xl md:rounded-2xl text-lg md:text-4xl font-black text-white transition-all transform active:scale-95 min-h-[60px]"
                 >
                   {p.name}
                 </button>
@@ -239,7 +238,7 @@ export const QuestionModal: React.FC<Props> = ({
             <button 
               type="button" 
               onClick={(e) => { e.stopPropagation(); setShowStealSelect(false); }} 
-              className="mt-16 text-zinc-500 hover:text-white uppercase text-xl font-black tracking-widest border-b-4 border-transparent hover:border-white transition-all"
+              className="mt-4 md:mt-16 text-zinc-500 hover:text-white uppercase text-sm md:text-xl font-black tracking-widest border-b-2 md:border-b-4 border-transparent hover:border-white transition-all mb-10"
             >
               Cancel Steal
             </button>
@@ -247,59 +246,59 @@ export const QuestionModal: React.FC<Props> = ({
         )}
       </div>
 
-      {/* BOTTOM: Action Bar - Always at bottom, never pushing off-screen */}
-      <div className="flex-none bg-zinc-950 border-t-2 border-zinc-800 p-4 md:p-6 z-10">
-        <div className="flex justify-center items-center gap-4 md:gap-8 max-w-7xl mx-auto w-full">
+      {/* BOTTOM: Action Bar - Sticky to screen bottom */}
+      <div className="flex-none bg-zinc-950 border-t border-zinc-800 p-3 md:p-6 z-10 safe-bottom">
+        <div className="flex justify-center items-center gap-3 md:gap-8 max-w-7xl mx-auto w-full">
           
           {!isRevealed ? (
             <button 
               type="button"
               onClick={(e) => handleAction('reveal', e)}
-              className="bg-gold-600 hover:bg-gold-500 text-black font-black text-2xl md:text-4xl px-12 md:px-20 py-4 md:py-6 rounded-2xl shadow-2xl uppercase tracking-tighter flex items-center gap-4 transition-transform active:scale-95 group"
+              className="bg-gold-600 hover:bg-gold-500 text-black font-black text-lg md:text-4xl px-8 md:px-20 py-3 md:py-6 rounded-xl md:rounded-2xl shadow-2xl uppercase tracking-tighter flex items-center gap-2 md:gap-4 transition-transform active:scale-95 group w-full max-w-md justify-center min-h-[50px]"
             >
-              <Monitor className="w-6 h-6 md:w-10 md:h-10 group-hover:animate-pulse" /> 
+              <Monitor className="w-5 h-5 md:w-10 md:h-10 group-hover:animate-pulse" /> 
               Reveal Answer
-              <span className="text-[10px] md:text-xs bg-black/20 px-2 py-1 rounded ml-4 font-mono">SPACE</span>
+              <span className="hidden md:inline text-xs bg-black/20 px-2 py-1 rounded ml-4 font-mono">SPACE</span>
             </button>
           ) : (
-            <div data-testid="action-buttons-container" className="flex flex-wrap justify-center gap-4 md:gap-6 animate-in slide-in-from-bottom-4 duration-300">
+            <div data-testid="action-buttons-container" className="flex flex-wrap justify-center gap-2 md:gap-6 animate-in slide-in-from-bottom-4 duration-300 w-full">
               <button 
                 type="button"
                 onClick={(e) => handleAction('return', e)}
-                className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-blue-400 transition-all px-4 py-2 rounded-xl hover:bg-blue-900/10 border-2 border-transparent hover:border-blue-900/30"
+                className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-blue-400 transition-all px-2 md:px-4 py-1.5 md:py-2 rounded-xl hover:bg-blue-900/10"
               >
-                <div className="p-3 bg-zinc-900 rounded-full mb-1 shadow-lg"><ArrowLeft className="w-5 h-5 md:w-6 md:h-6" /></div>
-                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Return (BKSP)</span>
+                <div className="p-2 md:p-3 bg-zinc-900 rounded-full shadow-lg"><ArrowLeft className="w-4 h-4 md:w-6 md:h-6" /></div>
+                <span className="text-[8px] md:text-xs font-black uppercase tracking-widest">Return</span>
               </button>
 
               <button 
                 type="button"
                 onClick={(e) => handleAction('void', e)}
-                className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-red-500 transition-all px-4 py-2 rounded-xl hover:bg-red-900/10 border-2 border-transparent hover:border-red-900/30"
+                className="flex flex-col items-center justify-center gap-1 text-zinc-500 hover:text-red-500 transition-all px-2 md:px-4 py-1.5 md:py-2 rounded-xl hover:bg-red-900/10"
               >
-                <div className="p-3 bg-zinc-900 rounded-full mb-1 shadow-lg"><Trash2 className="w-5 h-5 md:w-6 md:h-6" /></div>
-                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Void (ESC)</span>
+                <div className="p-2 md:p-3 bg-zinc-900 rounded-full shadow-lg"><Trash2 className="w-4 h-4 md:w-6 md:h-6" /></div>
+                <span className="text-[8px] md:text-xs font-black uppercase tracking-widest">Void</span>
               </button>
 
-              <div className="w-px h-12 md:h-16 bg-zinc-800 self-center hidden sm:block" />
+              <div className="w-px h-8 md:h-16 bg-zinc-800 self-center" />
 
               <button 
                 type="button"
                 onClick={(e) => handleAction('steal', e)}
-                className="flex flex-col items-center justify-center gap-1 text-purple-500 hover:text-purple-300 transition-all px-4 py-2 rounded-xl hover:bg-purple-900/20 border-2 border-transparent hover:border-purple-500/30 group"
+                className="flex flex-col items-center justify-center gap-1 text-purple-500 hover:text-purple-300 transition-all px-2 md:px-4 py-1.5 md:py-2 rounded-xl hover:bg-purple-900/20 group"
               >
-                <div className="p-3 bg-purple-900/20 border-4 border-purple-900 group-hover:bg-purple-600 group-hover:text-black group-hover:border-purple-500 rounded-full mb-1 shadow-2xl transition-all scale-110"><ShieldAlert className="w-6 h-6 md:w-8 md:h-8" /></div>
-                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Steal (S)</span>
+                <div className="p-2 md:p-3 bg-purple-900/20 border-2 md:border-4 border-purple-900 group-hover:bg-purple-600 group-hover:text-black group-hover:border-purple-500 rounded-full shadow-2xl transition-all scale-105 md:scale-110"><ShieldAlert className="w-4 h-4 md:w-8 md:h-8" /></div>
+                <span className="text-[8px] md:text-xs font-black uppercase tracking-widest">Steal</span>
               </button>
 
               <button 
                 type="button"
                 onClick={(e) => handleAction('award', e)}
                 disabled={!selectedPlayerId}
-                className="flex flex-col items-center justify-center gap-1 text-green-500 hover:text-green-300 transition-all px-4 py-2 rounded-xl hover:bg-green-900/20 border-2 border-transparent hover:border-green-500/30 group disabled:opacity-30 disabled:grayscale disabled:pointer-events-none"
+                className="flex flex-col items-center justify-center gap-1 text-green-500 hover:text-green-300 transition-all px-2 md:px-4 py-1.5 md:py-2 rounded-xl hover:bg-green-900/20 group disabled:opacity-30 disabled:grayscale disabled:pointer-events-none"
               >
-                <div className="p-3 bg-green-900/20 border-4 border-green-900 group-hover:bg-green-600 group-hover:text-black group-hover:border-green-500 rounded-full mb-1 shadow-2xl transition-all scale-110"><Trophy className="w-6 h-6 md:w-8 md:h-8" /></div>
-                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Award (ENTER)</span>
+                <div className="p-2 md:p-3 bg-green-900/20 border-2 md:border-4 border-green-900 group-hover:bg-green-600 group-hover:text-black group-hover:border-green-500 rounded-full shadow-2xl transition-all scale-105 md:scale-110"><Trophy className="w-4 h-4 md:w-8 md:h-8" /></div>
+                <span className="text-[8px] md:text-xs font-black uppercase tracking-widest">Award</span>
               </button>
             </div>
           )}
@@ -307,10 +306,11 @@ export const QuestionModal: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Producer Info Tag */}
-      <div className="absolute bottom-1 right-2 text-[8px] font-mono text-zinc-700 uppercase tracking-widest pointer-events-none z-20">
-         Active Producer: {activePlayer ? activePlayer.name : 'None'}
-      </div>
+      <style>{`
+        .safe-bottom {
+          padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+        }
+      `}</style>
     </div>
   );
 };

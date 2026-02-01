@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>CRUZPHAM TRIVIA STUDIOS</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -42,14 +42,15 @@
       body {
         background-color: #000000;
         color: #FFD700;
-        overflow: hidden; /* Enforce one screen */
+        margin: 0;
+        padding: 0;
       }
       /* Reusable Roboto Bold class as requested */
       .font-roboto-bold {
         font-family: "Roboto", system-ui, sans-serif;
         font-weight: 700;
       }
-      /* Custom Scrollbar for internal content if strictly needed on tiny screens */
+      /* Custom Scrollbar for internal content */
       ::-webkit-scrollbar {
         width: 6px;
       }

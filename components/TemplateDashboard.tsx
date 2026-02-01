@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Play, Trash2, ArrowLeftRight, Loader2, Gamepad2, Download, Upload, Edit } from 'lucide-react';
 import { dataService } from '../services/dataService';
@@ -11,9 +10,10 @@ interface Props {
   onSwitchShow: () => void;
   onPlayTemplate: (template: GameTemplate) => void;
   addToast: (type: any, msg: string) => void;
+  onLogout?: () => void;
 }
 
-export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayTemplate, addToast }) => {
+export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayTemplate, addToast, onLogout }) => {
   const [templates, setTemplates] = useState<GameTemplate[]>([]);
   const [editingTemplate, setEditingTemplate] = useState<GameTemplate | null | undefined>(undefined); // undefined = closed, null = new, object = edit
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -101,6 +101,7 @@ export const TemplateDashboard: React.FC<Props> = ({ show, onSwitchShow, onPlayT
           setEditingTemplate(undefined);
           loadTemplates();
         }}
+        onLogout={onLogout}
         addToast={addToast}
       />
     );

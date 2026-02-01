@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle } from 'lucide-react';
-import { GameState, Question, Difficulty, Category, BoardViewSettings, Player } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash } from 'lucide-react';
+import { GameState, Question, Difficulty, Category, BoardViewSettings, Player, PlayEvent } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
 import { soundService } from '../services/soundService';
@@ -19,10 +19,41 @@ interface Props {
 export const DirectorPanel: React.FC<Props> = ({ 
   gameState, onUpdateState, onPopout, isPoppedOut, onBringBack, addToast, onClose 
 }) => {
-  const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD'>('BOARD');
+  const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD' | 'STATS'>('BOARD');
   const [editingQuestion, setEditingQuestion] = useState<{cIdx: number, qIdx: number} | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [confirmResetAllWildcards, setConfirmResetAllWildcards] = useState(false);
+  
+  // Add Player State
+  const [isAddingPlayer, setIsAddingPlayer] = useState(false);
+  const [newPlayerName, setNewPlayerName] = useState('');
+
+  // Log Stats render
+  useEffect(() => {
+    if (activeTab === 'STATS') {
+      logger.info("stats_board_render", { showTitle: gameState.showTitle });
+    }
+  }, [activeTab, gameState.showTitle]);
+
+  // --- SELECTORS ---
+  const boardStats = useMemo(() => {
+    const allQs = gameState.categories.flatMap(c => c.questions);
+    const total = allQs.length;
+    const answered = allQs.filter(q => q.isAnswered).length;
+    const voided = allQs.filter(q => q.isVoided).length;
+    const doubles = allQs.filter(q => q.isDoubleOrNothing).length;
+    const remaining = total - (answered + voided);
+    const progress = total > 0 ? (answered / total) * 100 : 0;
+
+    return { total, answered, voided, remaining, progress, doubles };
+  }, [gameState.categories]);
+
+  const activeQuestionInfo = useMemo(() => {
+    if (!gameState.activeQuestionId) return null;
+    const cat = gameState.categories.find(c => c.id === gameState.activeCategoryId);
+    const q = cat?.questions.find(q => q.id === gameState.activeQuestionId);
+    return { catTitle: cat?.title, points: q?.points, isRevealed: q?.isRevealed };
+  }, [gameState.activeQuestionId, gameState.activeCategoryId, gameState.categories]);
 
   // --- ACTIONS ---
 
@@ -35,6 +66,56 @@ export const DirectorPanel: React.FC<Props> = ({
       p.id === id ? { ...p, [field]: value } : p
     );
     onUpdateState({ ...gameState, players: newPlayers });
+  };
+
+  const handleDirectorAddPlayer = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newPlayerName.trim();
+    
+    if (!trimmed || trimmed.length < 2) {
+      addToast('error', 'Name must be at least 2 characters.');
+      return;
+    }
+
+    logger.info("player_add_attempt", { name: trimmed });
+
+    if (gameState.players.length >= 8) {
+      addToast('error', 'Maximum 8 players reached.');
+      logger.warn("player_add_failed", { reason: "LIMIT_REACHED", message: "Max players 8" });
+      return;
+    }
+
+    let finalName = trimmed;
+    let count = 2;
+    const existingNames = gameState.players.map(p => p.name.toLowerCase());
+    while (existingNames.includes(finalName.toLowerCase())) {
+      finalName = `${trimmed} ${count}`;
+      count++;
+    }
+
+    const newPlayer: Player = { 
+      id: crypto.randomUUID(), 
+      name: finalName, 
+      score: 0, 
+      color: '#fff', 
+      wildcardsUsed: 0, 
+      wildcardActive: false, 
+      stealsCount: 0 
+    };
+
+    soundService.playClick();
+    const newPlayers = [...gameState.players, newPlayer];
+    
+    onUpdateState({ 
+      ...gameState, 
+      players: newPlayers,
+      selectedPlayerId: gameState.selectedPlayerId || newPlayer.id 
+    });
+
+    logger.info("player_add_success", { playerId: newPlayer.id, name: finalName, totalPlayers: newPlayers.length });
+    addToast('success', `Added ${finalName}`);
+    setNewPlayerName('');
+    setIsAddingPlayer(false);
   };
 
   const handleUseWildcard = (player: Player) => {
@@ -216,6 +297,20 @@ export const DirectorPanel: React.FC<Props> = ({
     addToast('info', 'Director UI reset.');
   };
 
+  const clearLogHistory = () => {
+    if (confirm('Clear the Last 4 Plays history? This action is purely visual.')) {
+      soundService.playClick();
+      onUpdateState({ ...gameState, lastPlays: [] });
+      addToast('info', 'Play history cleared.');
+    }
+  };
+
+  const copyPlayToClipboard = (play: PlayEvent) => {
+    const summary = `${play.action}: ${play.categoryName} / ${play.basePoints} pts. ${play.awardedPlayerName ? `Awarded to ${play.awardedPlayerName}` : ''}${play.stealerPlayerName ? `Stolen by ${play.stealerPlayerName}` : ''}`;
+    navigator.clipboard.writeText(summary);
+    addToast('info', 'Copied to clipboard');
+  };
+
   // --- RENDER ---
 
   if (isPoppedOut) {
@@ -246,6 +341,8 @@ export const DirectorPanel: React.FC<Props> = ({
     );
   }
 
+  const isAtMaxPlayers = gameState.players.length >= 8;
+
   return (
     <div className="h-full flex flex-col bg-zinc-950 text-white relative">
       {/* TOOLBAR */}
@@ -256,6 +353,9 @@ export const DirectorPanel: React.FC<Props> = ({
           </button>
           <button type="button" onClick={() => { soundService.playClick(); setActiveTab('PLAYERS'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Users className="w-4 h-4" /> Players
+          </button>
+          <button type="button" onClick={() => { soundService.playClick(); setActiveTab('STATS'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'STATS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+            <BarChart3 className="w-4 h-4" /> Stats
           </button>
           <button type="button" onClick={() => { soundService.playClick(); setActiveTab('GAME'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'GAME' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Settings className="w-4 h-4" /> Config
@@ -289,6 +389,198 @@ export const DirectorPanel: React.FC<Props> = ({
       {/* CONTENT */}
       <div className="flex-1 overflow-auto p-4 custom-scrollbar">
         
+        {/* === STATS DASHBOARD === */}
+        {activeTab === 'STATS' && (
+          <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300 pb-20">
+             {/* Header */}
+             <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+               <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm flex items-center gap-2">
+                 <BarChart3 className="w-4 h-4" /> Live Game Analytics
+               </h3>
+               <span className="text-[10px] font-mono text-zinc-500">LAST SYNC: {new Date().toLocaleTimeString()}</span>
+             </div>
+
+             {/* Summary Grid */}
+             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg">
+                   <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">Board Capacity</p>
+                   <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-white">{boardStats.total}</span>
+                      <span className="text-xs text-zinc-600 font-mono">TILES</span>
+                   </div>
+                   <p className="text-[9px] text-zinc-600 mt-1 uppercase">{gameState.categories.length} CATS x {gameState.categories[0]?.questions.length || 0} ROWS</p>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg">
+                   <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">Progress</p>
+                   <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-gold-500">{Math.round(boardStats.progress)}%</span>
+                   </div>
+                   <div className="w-full bg-zinc-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                      <div className="bg-gold-500 h-full transition-all duration-1000" style={{ width: `${boardStats.progress}%` }} />
+                   </div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg">
+                   <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">Tile Distribution</p>
+                   <div className="flex gap-4 mt-1">
+                      <div><p className="text-xs text-green-500 font-bold">{boardStats.answered}</p><p className="text-[8px] text-zinc-600 uppercase">Played</p></div>
+                      <div><p className="text-xs text-red-500 font-bold">{boardStats.voided}</p><p className="text-[8px] text-zinc-600 uppercase">Void</p></div>
+                      <div><p className="text-xs text-zinc-300 font-bold">{boardStats.remaining}</p><p className="text-[8px] text-zinc-600 uppercase">Rem</p></div>
+                   </div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg">
+                   <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">Special Tiles</p>
+                   <div className="flex items-center gap-2">
+                      <span className="text-2xl font-bold text-red-500">{boardStats.doubles}</span>
+                      <span className="text-[10px] text-zinc-600 uppercase font-bold leading-tight">Double Or<br/>Nothing</span>
+                   </div>
+                </div>
+             </div>
+
+             {/* Real-time Log Section */}
+             <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-zinc-900 pb-1">
+                   <h4 className="text-xs font-bold uppercase text-zinc-500 flex items-center gap-2">
+                      <History className="w-3.5 h-3.5" /> Last 4 Plays
+                   </h4>
+                   <button 
+                    onClick={clearLogHistory}
+                    disabled={!gameState.lastPlays || gameState.lastPlays.length === 0}
+                    className="text-[10px] uppercase font-bold text-zinc-600 hover:text-red-400 transition-colors flex items-center gap-1 disabled:opacity-30 disabled:pointer-events-none"
+                   >
+                      <Trash className="w-2.5 h-2.5" /> Clear Logs
+                   </button>
+                </div>
+                <div className="bg-black border border-zinc-800 rounded-lg overflow-hidden divide-y divide-zinc-900">
+                   {(!gameState.lastPlays || gameState.lastPlays.length === 0) ? (
+                      <div className="p-8 text-center text-zinc-700 italic text-xs">No activity logged in this session.</div>
+                   ) : (
+                      gameState.lastPlays.map((play) => (
+                         <div key={play.id} className="p-3 flex items-center justify-between hover:bg-zinc-900/50 transition-colors group">
+                            <div className="flex items-center gap-4 flex-1 min-w-0">
+                               <div className="shrink-0 text-center min-w-[70px]">
+                                  <p className="text-[10px] font-mono text-zinc-500">{new Date(play.atMs).toLocaleTimeString([], { hour12: false })}</p>
+                                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${
+                                     play.action === 'AWARD' ? 'bg-green-900 text-green-300' :
+                                     play.action === 'STEAL' ? 'bg-purple-900 text-purple-300' :
+                                     play.action === 'VOID' ? 'bg-red-900 text-red-300' : 
+                                     play.action === 'RETURN' ? 'bg-blue-900 text-blue-300' : 'bg-zinc-800 text-zinc-400'
+                                  }`}>
+                                     {play.action}
+                                  </span>
+                               </div>
+                               <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                     <p className="text-xs font-bold text-white truncate">
+                                        {play.action === 'AWARD' && <><span className="text-zinc-500">AWARD &rarr; </span> {play.awardedPlayerName} <span className="text-gold-500 ml-2">+{play.effectivePoints}</span></>}
+                                        {play.action === 'STEAL' && <><span className="text-zinc-500">STEAL &rarr; </span> {play.stealerPlayerName} <span className="text-gold-500 ml-2">+{play.effectivePoints}</span> <span className="text-zinc-500 ml-1">(from {play.attemptedPlayerName})</span></>}
+                                        {play.action === 'VOID' && <><span className="text-zinc-500">VOID &rarr; </span> <span className="text-red-400 italic">tile disabled</span></>}
+                                        {play.action === 'RETURN' && <><span className="text-zinc-500">RETURN &rarr; </span> <span className="text-blue-400 italic">tile restored</span></>}
+                                     </p>
+                                     {play.notes && <span className="text-[8px] text-gold-600 bg-gold-950/30 border border-gold-900/30 px-1 rounded font-bold uppercase">{play.notes}</span>}
+                                  </div>
+                                  <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                                     {play.categoryName} / {play.basePoints} pts
+                                  </p>
+                               </div>
+                            </div>
+                            <button 
+                              onClick={() => copyPlayToClipboard(play)}
+                              className="opacity-0 group-hover:opacity-100 p-2 text-zinc-600 hover:text-gold-500 transition-all"
+                              title="Copy Summary"
+                            >
+                               <Copy className="w-3.5 h-3.5" />
+                            </button>
+                         </div>
+                      ))
+                   )}
+                </div>
+             </div>
+
+             {/* Player Metrics & State Row */}
+             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Player Stats */}
+                <div className="lg:col-span-2 space-y-4">
+                   <h4 className="text-xs font-bold uppercase text-zinc-500 border-b border-zinc-900 pb-1">Contestant Performance</h4>
+                   <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-black text-zinc-600 uppercase font-mono">
+                           <tr>
+                             <th className="p-3">Player</th>
+                             <th className="p-3">Score</th>
+                             <th className="p-3">Steals</th>
+                             <th className="p-3">Wildcards</th>
+                           </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-800">
+                           {gameState.players.map(p => (
+                             <tr key={p.id} className="hover:bg-zinc-800/50">
+                               <td className="p-3 font-bold text-zinc-300">{p.name}</td>
+                               <td className="p-3 font-mono text-gold-500 font-bold">{p.score}</td>
+                               <td className="p-3 font-mono text-purple-400 font-bold">{p.stealsCount || 0}</td>
+                               <td className="p-3">
+                                 <div className="flex gap-0.5">
+                                   {Array.from({length: 4}).map((_, i) => (
+                                     <Star key={i} className={`w-3 h-3 ${i < (p.wildcardsUsed || 0) ? 'text-gold-500 fill-gold-500' : 'text-zinc-800'}`} />
+                                   ))}
+                                 </div>
+                               </td>
+                             </tr>
+                           ))}
+                        </tbody>
+                      </table>
+                   </div>
+                </div>
+
+                {/* Current Context */}
+                <div className="space-y-4">
+                   <h4 className="text-xs font-bold uppercase text-zinc-500 border-b border-zinc-900 pb-1">Current State</h4>
+                   <div className={`p-6 rounded-lg border flex flex-col justify-between h-48 transition-all ${activeQuestionInfo ? 'bg-gold-950/20 border-gold-500/50' : 'bg-zinc-900 border-zinc-800'}`}>
+                      {activeQuestionInfo ? (
+                        <>
+                          <div>
+                            <div className="flex items-center gap-2 text-[10px] text-gold-500 font-bold uppercase mb-2">
+                               <RefreshCw className="w-3 h-3 animate-spin-slow" /> ACTIVE QUESTION
+                            </div>
+                            <h5 className="text-white font-bold leading-tight line-clamp-2">{activeQuestionInfo.catTitle}</h5>
+                            <p className="text-xl font-black text-white mt-1">{activeQuestionInfo.points} <span className="text-xs font-normal text-zinc-500">POINTS</span></p>
+                          </div>
+                          <div className="flex justify-between items-center mt-4">
+                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${activeQuestionInfo.isRevealed ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'}`}>
+                               {activeQuestionInfo.isRevealed ? 'REVEALED' : 'HIDDEN'}
+                             </span>
+                             {gameState.timer.isRunning && (
+                                <span className="text-red-500 font-mono font-bold animate-pulse flex items-center gap-1">
+                                   <Clock className="w-3 h-3" /> LIVE
+                                </span>
+                             )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
+                           <Info className="w-8 h-8 opacity-20" />
+                           <p className="text-xs uppercase font-bold tracking-widest italic opacity-40">Board Idle</p>
+                        </div>
+                      )}
+                   </div>
+                   
+                   {/* Quick Actions / Micro Stats */}
+                   <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                         <div className="p-2 bg-black rounded border border-zinc-800"><Timer className="w-4 h-4 text-zinc-500" /></div>
+                         <div>
+                            <p className="text-[10px] font-bold text-zinc-500 uppercase">Timer Settings</p>
+                            <p className="text-xs text-white">{gameState.timer.duration}s Session</p>
+                         </div>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${gameState.timer.isRunning ? 'bg-green-900 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                         {gameState.timer.isRunning ? 'RUNNING' : 'STOPPED'}
+                      </span>
+                   </div>
+                </div>
+             </div>
+          </div>
+        )}
+
         {/* === BOARD EDITOR === */}
         {activeTab === 'BOARD' && (
           <div className="space-y-6">
@@ -439,14 +731,38 @@ export const DirectorPanel: React.FC<Props> = ({
         {/* === PLAYERS EDITOR === */}
         {activeTab === 'PLAYERS' && (
           <div className="max-w-3xl mx-auto space-y-4">
-             <div className="flex justify-between items-center mb-4">
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Contestant Management</h3>
-               <button 
-                 onClick={handleResetAllWildcards}
-                 className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase border transition-all ${confirmResetAllWildcards ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-white'}`}
-               >
-                 <RotateCcw className="w-3 h-3" /> {confirmResetAllWildcards ? 'Click to Confirm Reset All' : 'Reset All Wildcards'}
-               </button>
+               <div className="flex items-center gap-2">
+                 {!isAddingPlayer ? (
+                   <button 
+                     onClick={() => { if(!isAtMaxPlayers) { soundService.playClick(); setIsAddingPlayer(true); }}} 
+                     disabled={isAtMaxPlayers}
+                     className="flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase bg-zinc-900 border border-zinc-700 text-gold-500 hover:text-gold-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                     title={isAtMaxPlayers ? "Max 8 players" : "Add new player"}
+                   >
+                     <UserPlus className="w-3 h-3" /> Add Player
+                   </button>
+                 ) : (
+                   <form onSubmit={handleDirectorAddPlayer} className="flex items-center gap-2 bg-black p-1 rounded border border-gold-500 animate-in slide-in-from-right-2">
+                     <input 
+                       autoFocus
+                       value={newPlayerName}
+                       onChange={e => setNewPlayerName(e.target.value)}
+                       placeholder="PLAYER NAME"
+                       className="bg-transparent text-xs text-white px-2 py-1 outline-none w-32 uppercase"
+                     />
+                     <button type="submit" className="p-1 text-green-500 hover:text-green-400"><Check className="w-4 h-4" /></button>
+                     <button type="button" onClick={() => setIsAddingPlayer(false)} className="p-1 text-zinc-500 hover:text-white"><X className="w-4 h-4" /></button>
+                   </form>
+                 )}
+                 <button 
+                   onClick={handleResetAllWildcards}
+                   className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase border transition-all ${confirmResetAllWildcards ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-white'}`}
+                 >
+                   <RotateCcw className="w-3 h-3" /> {confirmResetAllWildcards ? 'Click to Confirm Reset All' : 'Reset All Wildcards'}
+                 </button>
+               </div>
              </div>
              
              <div className="bg-zinc-900 rounded border border-zinc-800 overflow-hidden">

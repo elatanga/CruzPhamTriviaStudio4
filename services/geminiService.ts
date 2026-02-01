@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { Category, Question, Difficulty, AppError } from "../types";
 import { logger } from "./logger";
 
@@ -42,7 +42,8 @@ const extractAndParseJson = (text: string, generationId: string) => {
   }
 };
 
-const getSchema = (numCats: number, numQs: number): Schema => {
+// Fix: Removed explicit Schema return type and import to align with coding guidelines and avoid potential export issues.
+const getSchema = (numCats: number, numQs: number) => {
   return {
     type: Type.ARRAY,
     items: {
@@ -231,7 +232,7 @@ export const generateCategoryQuestions = async (
     const prompt = `Generate ${count} trivia questions for the category "${categoryTitle}" within the topic "${topic}".
       Difficulty: ${difficulty}.
       Questions should range from easy to hard.
-      ${attempt > 0 ? "RETURN VALID JSON ONLY." : ""}`;
+      ${attempt > 0 ? "IMPORTANT: RETURN VALID JSON ONLY." : ""}`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",

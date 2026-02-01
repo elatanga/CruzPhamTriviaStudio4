@@ -43,10 +43,21 @@ class SoundService {
     if (!this.isMuted && Math.random() > 0.8) this.playClick();
   }
 
+  // --- HAPTICS ---
+  vibrate(pattern: number | number[] = 10) {
+    if (this.isMuted || typeof navigator === 'undefined' || !navigator.vibrate) return;
+    try {
+      navigator.vibrate(pattern);
+    } catch (e) {
+      // Silence errors if API is restricted by browser policy
+    }
+  }
+
   // --- SYNTHESIZERS ---
 
   // Soft UI Click (Navigation, generic buttons)
   playClick() {
+    this.vibrate(5);
     if (this.isMuted || !this.getCtx()) return;
     const ctx = this.getCtx()!;
     const t = ctx.currentTime;
@@ -71,6 +82,7 @@ class SoundService {
 
   // Tile Selection (Slightly more presence than click)
   playSelect() {
+    this.vibrate(10);
     if (this.isMuted || !this.getCtx()) return;
     const ctx = this.getCtx()!;
     const t = ctx.currentTime;
@@ -102,6 +114,7 @@ class SoundService {
 
   // Reveal Answer (Magical/Glassy Swell)
   playReveal() {
+    this.vibrate([10, 30, 10]);
     if (this.isMuted || !this.getCtx()) return;
     const ctx = this.getCtx()!;
     const t = ctx.currentTime;
@@ -153,6 +166,7 @@ class SoundService {
 
   // Points Awarded (Positive/Success Chime)
   playAward() {
+    this.vibrate(20);
     if (this.isMuted || !this.getCtx()) return;
     const ctx = this.getCtx()!;
     const t = ctx.currentTime;
@@ -183,6 +197,7 @@ class SoundService {
 
   // Steal Points (Tense/Suspense)
   playSteal() {
+    this.vibrate([15, 5, 15]);
     if (this.isMuted || !this.getCtx()) return;
     const ctx = this.getCtx()!;
     const t = ctx.currentTime;
@@ -213,6 +228,7 @@ class SoundService {
 
   // Void/Error (Low Thud)
   playVoid() {
+    this.vibrate(30);
     if (this.isMuted || !this.getCtx()) return;
     const ctx = this.getCtx()!;
     const t = ctx.currentTime;
@@ -242,6 +258,7 @@ class SoundService {
 
   // Double Or Nothing (Fanfare)
   playDoubleOrNothing() {
+    this.vibrate([10, 10, 10, 10, 10]);
     if (this.isMuted || !this.getCtx()) return;
     const ctx = this.getCtx()!;
     const t = ctx.currentTime;
@@ -289,6 +306,7 @@ class SoundService {
   }
 
   playTimerAlarm() {
+    this.vibrate([100, 50, 100]);
     if (this.isMuted || !this.getCtx()) return;
     const ctx = this.getCtx()!;
     const t = ctx.currentTime;
@@ -323,6 +341,7 @@ class SoundService {
     const gain = ctx.createGain();
     
     if (type === 'success') {
+      this.vibrate(5);
       // Gentle High Ping
       osc.type = 'sine';
       osc.frequency.setValueAtTime(1200, t);
@@ -330,6 +349,7 @@ class SoundService {
       gain.gain.linearRampToValueAtTime(this.volume * 0.05, t + 0.05);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
     } else if (type === 'error') {
+      this.vibrate(20);
       // Soft Buzzer
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(150, t);

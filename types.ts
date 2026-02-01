@@ -39,6 +39,26 @@ export interface BoardViewSettings {
   updatedAt: string;
 }
 
+export interface PlayEvent {
+  id: string;
+  atIso: string;
+  atMs: number;
+  action: 'AWARD' | 'STEAL' | 'VOID' | 'RETURN';
+  tileId: string;
+  categoryIndex?: number;
+  categoryName?: string;
+  rowIndex?: number;
+  basePoints?: number;
+  effectivePoints?: number;
+  attemptedPlayerId?: string;
+  attemptedPlayerName?: string;
+  awardedPlayerId?: string;
+  awardedPlayerName?: string;
+  stealerPlayerId?: string;
+  stealerPlayerName?: string;
+  notes?: string;
+}
+
 export interface GameState {
   showTitle: string;
   isGameStarted: boolean;
@@ -50,6 +70,7 @@ export interface GameState {
   history: string[];
   timer: GameTimer;
   viewSettings: BoardViewSettings;
+  lastPlays: PlayEvent[];
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
