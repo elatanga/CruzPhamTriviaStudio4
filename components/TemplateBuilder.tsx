@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2, HelpCircle, AlertCircle, Maximize2, Minimize2, RotateCcw, Sparkles, Hash, LogOut } from 'lucide-react';
+import { Save, X, Wand2, RefreshCw, Loader2, Download, Upload, Plus, Minus, Trash2, HelpCircle, AlertCircle, Maximize2, Minimize2, RotateCcw, Sparkles, Hash, LogOut, Edit } from 'lucide-react';
 import { GameTemplate, Category, Question, Difficulty } from '../types';
 import { generateTriviaGame, generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { dataService } from '../services/dataService';
@@ -24,6 +24,9 @@ interface Props {
   onLogout?: () => void;
   addToast: (type: any, msg: string) => void;
 }
+
+const MAX_PLAYERS = 8;
+const MIN_PLAYERS = 1;
 
 export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onClose, onSave, onLogout, addToast }) => {
   // --- STATE MACHINE ---
@@ -57,10 +60,36 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     pointScale: getSafePointScale(initialTemplate?.config?.pointScale)
   });
 
-  const [playerNames, setPlayerNames] = useState<string[]>(
-    (initialTemplate?.config?.playerNames || 
-    (initialTemplate?.config?.playerCount ? Array.from({length: initialTemplate.config.playerCount}).map((_, i) => `PLAYER ${i+1}`) : ['PLAYER 1', 'PLAYER 2', 'PLAYER 3', 'PLAYER 4'])).map(n => normalizePlayerName(n))
-  );
+  // --- PLAYER CONFIGURATION WITH STABLE IDS & CLAMPING ---
+  const [playerConfigs, setPlayerConfigs] = useState<{id: string, name: string}[]>(() => {
+    const names = initialTemplate?.config?.playerNames || [];
+    const count = initialTemplate?.config?.playerCount || 4;
+    
+    let initialList = names.map(n => ({ id: crypto.randomUUID(), name: normalizePlayerName(n) }));
+    if (initialList.length === 0 && count > 0) {
+      initialList = Array.from({ length: count }).map((_, i) => ({ 
+        id: crypto.randomUUID(), 
+        name: `PLAYER ${i + 1}` 
+      }));
+    } else if (initialList.length === 0) {
+      initialList = Array.from({ length: 4 }).map((_, i) => ({ 
+        id: crypto.randomUUID(), 
+        name: `PLAYER ${i + 1}` 
+      }));
+    }
+
+    // Defensive clamping on init (Card 1 constraint)
+    if (initialList.length > MAX_PLAYERS) {
+      logger.error("template_players_over_max_clamped", { 
+        ts: new Date().toISOString(), 
+        originalCount: initialList.length, 
+        clampedTo: MAX_PLAYERS 
+      });
+      initialList = initialList.slice(0, MAX_PLAYERS);
+    }
+    
+    return initialList;
+  });
 
   const [categories, setCategories] = useState<Category[]>(initialTemplate?.categories || []);
   const [editCell, setEditCell] = useState<{cIdx: number, qIdx: number} | null>(null);
@@ -68,64 +97,176 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
   const isLocked = genState.status === 'GENERATING' || genState.status === 'APPLYING' || isSaving;
 
   // --- LOGGING & LAYOUT INSTRUMENTATION ---
-  
   useEffect(() => {
-    const viewportW = window.innerWidth;
-    const viewportH = window.innerHeight;
-    const atIso = new Date().toISOString();
-    logger.info("live_builder_mount", { viewportW, viewportH, atIso });
-
-    const timeout = setTimeout(() => {
-      requestAnimationFrame(() => {
-        if (headerRef.current && saveBtnRef.current) {
-          const bannerRect = headerRef.current.getBoundingClientRect();
-          const saveRect = saveBtnRef.current.getBoundingClientRect();
-          
-          const isOverlapping = !(
-            saveRect.right < bannerRect.left || 
-            saveRect.left > bannerRect.right || 
-            saveRect.bottom < bannerRect.top || 
-            saveRect.top > bannerRect.bottom
-          );
-
-          const isFullyVisible = 
-            saveRect.top >= 0 &&
-            saveRect.left >= 0 &&
-            saveRect.bottom <= window.innerHeight &&
-            saveRect.right <= window.innerWidth;
-
-          if (isOverlapping || !isFullyVisible) {
-            logger.warn("live_builder_save_obstructed", { 
-              saveRect: { t: saveRect.top, l: saveRect.left, b: saveRect.bottom, r: saveRect.right },
-              bannerRect: { t: bannerRect.top, l: bannerRect.left, b: bannerRect.bottom, r: bannerRect.right },
-              isOverlapping,
-              isFullyVisible,
-              atIso: new Date().toISOString()
-            });
-          }
-        }
-      });
-    }, 500);
-
-    return () => clearTimeout(timeout);
-  }, [step]);
-
-  useEffect(() => {
-    if (step === 'BUILDER' && !isLocked) {
-      logger.info("live_builder_save_visible_check", { 
-        isDesktop: window.innerWidth >= 1024, 
-        atIso: new Date().toISOString() 
+    if (step === 'CONFIG') {
+      logger.info("template_modal_render", { 
+        ts: new Date().toISOString(), 
+        playersCount: playerConfigs.length, 
+        viewport: { w: window.innerWidth, h: window.innerHeight } 
       });
     }
-  }, [step, isLocked]);
+  }, [step, playerConfigs.length]);
 
-  const guardedSetCategories = (
-    updater: Category[] | ((prev: Category[]) => Category[]), 
-    meta?: { source: string; genId?: string }
-  ) => {
-    const isAiApply = meta?.source === 'AI_GENERATION' && meta?.genId === currentGenId.current;
-    if (isLocked && !isAiApply) return;
-    setCategories(updater);
+  // --- HANDLERS ---
+
+  const handleAddPlayer = () => {
+    if (isLocked) return;
+    if (playerConfigs.length >= MAX_PLAYERS) {
+      logger.warn("template_players_add_blocked_max", { ts: new Date().toISOString(), count: playerConfigs.length });
+      addToast('error', `Max ${MAX_PLAYERS} contestants allowed.`);
+      return;
+    }
+    soundService.playClick();
+    setPlayerConfigs([...playerConfigs, { id: crypto.randomUUID(), name: `PLAYER ${playerConfigs.length + 1}` }]);
+  };
+
+  const handleDeletePlayer = (id: string) => {
+    if (isLocked) return;
+    if (playerConfigs.length <= MIN_PLAYERS) {
+      logger.warn("template_player_delete_blocked_min", { ts: new Date().toISOString() });
+      addToast('error', `At least ${MIN_PLAYERS} contestant required.`);
+      return;
+    }
+    soundService.playClick();
+    const updated = playerConfigs.filter(p => p.id !== id);
+    setPlayerConfigs(updated);
+    logger.info("template_player_deleted", { ts: new Date().toISOString(), playerId: id, remainingCount: updated.length });
+  };
+
+  const handlePlayerNameChange = (id: string, value: string) => {
+    setPlayerConfigs(prev => prev.map(p => p.id === id ? { ...p, name: normalizePlayerName(value) } : p));
+  };
+
+  const handleSave = async () => {
+    if (isLocked || isSaving) return;
+    soundService.playClick();
+    
+    const atIso = new Date().toISOString();
+    logger.info("template_save_click", { templateId: initialTemplate?.id || 'new', showId, ts: atIso });
+
+    setIsSaving(true);
+    try {
+      await new Promise(r => setTimeout(r, 400));
+      const validatedCategories = categories.map(cat => {
+        if (cat.questions.some(q => q.isDoubleOrNothing)) return cat;
+        const lucky = Math.floor(Math.random() * cat.questions.length);
+        return {
+          ...cat,
+          questions: cat.questions.map((q, i) => ({...q, isDoubleOrNothing: i === lucky}))
+        };
+      });
+
+      const finalPlayerNames = playerConfigs.map(p => p.name).filter(n => !!n);
+
+      if (initialTemplate) {
+        dataService.updateTemplate({
+          ...initialTemplate,
+          topic: config.title,
+          categories: validatedCategories,
+          config: {
+            playerCount: finalPlayerNames.length,
+            playerNames: finalPlayerNames,
+            categoryCount: validatedCategories.length,
+            rowCount: validatedCategories[0]?.questions.length || config.rowCount,
+            pointScale: config.pointScale
+          }
+        });
+      } else {
+        dataService.createTemplate(showId, config.title, {
+          playerCount: finalPlayerNames.length,
+          playerNames: finalPlayerNames,
+          categoryCount: validatedCategories.length,
+          rowCount: validatedCategories[0]?.questions.length || config.rowCount,
+          pointScale: config.pointScale
+        }, validatedCategories);
+      }
+      
+      logger.info("template_save_success", { templateId: initialTemplate?.id || 'new', ts: new Date().toISOString() });
+      addToast('success', 'Template saved successfully.');
+      onSave();
+    } catch (e: any) {
+      logger.error("template_save_failed", { message: e.message, ts: new Date().toISOString() });
+      addToast('error', 'Save failed — please retry');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const startAiGeneration = (stage: string) => {
+    const genId = crypto.randomUUID();
+    currentGenId.current = genId;
+    snapshotRef.current = [...categories];
+    setGenState({ status: 'GENERATING', id: genId, stage });
+    return genId;
+  };
+
+  const handleAiFillBoard = async (prompt: string, difficulty: Difficulty) => {
+    if (!prompt.trim() || isLocked) return;
+    const genId = startAiGeneration('Populating entire board...');
+    try {
+      const generatedCats = await generateTriviaGame(prompt, difficulty, config.catCount, config.rowCount, config.pointScale, genId);
+      if (currentGenId.current !== genId) return;
+      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
+      setCategories(generatedCats);
+      setConfig(prev => ({...prev, title: prompt}));
+      setGenState({ status: 'COMPLETE', id: null, stage: '' });
+      addToast('success', 'Board populated by AI.');
+    } catch (e: any) {
+      if (currentGenId.current === genId) {
+        setGenState({ status: 'FAILED', id: null, stage: '' });
+        if (snapshotRef.current) setCategories(snapshotRef.current);
+        addToast('error', 'AI Generation failed.');
+      }
+    }
+  };
+
+  const handleAiRewriteCategory = async (cIdx: number) => {
+    if (isLocked) return;
+    soundService.playClick();
+    const genId = startAiGeneration(`Rewriting category: ${categories[cIdx].title}`);
+    try {
+      const cat = categories[cIdx];
+      const newQs = await generateCategoryQuestions(config.title, cat.title, cat.questions.length, aiDifficulty, config.pointScale, genId);
+      if (currentGenId.current !== genId) return;
+      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
+      const newCats = [...categories];
+      newCats[cIdx] = {
+        ...cat,
+        questions: newQs.map((nq, i) => ({ ...nq, points: (i + 1) * config.pointScale, id: cat.questions[i]?.id || nq.id }))
+      };
+      setCategories(newCats);
+      setGenState({ status: 'COMPLETE', id: null, stage: '' });
+      addToast('success', `Category rewritten.`);
+    } catch (e: any) {
+      if (currentGenId.current === genId) {
+        setGenState({ status: 'FAILED', id: null, stage: '' });
+        addToast('error', 'AI Failed to rewrite category.');
+      }
+    }
+  };
+
+  const handleMagicCell = async (cIdx: number, qIdx: number) => {
+    if (isLocked) return;
+    soundService.playClick();
+    const genId = startAiGeneration('Generating question...');
+    try {
+      const cat = categories[cIdx];
+      const q = cat.questions[qIdx];
+      const result = await generateSingleQuestion(config.title, q.points, cat.title, aiDifficulty, genId);
+      if (currentGenId.current !== genId) return;
+      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
+      const newCats = [...categories];
+      newCats[cIdx] = { ...newCats[cIdx], questions: [...newCats[cIdx].questions] };
+      newCats[cIdx].questions[qIdx] = { ...q, text: result.text, answer: result.answer };
+      setCategories(newCats);
+      setGenState({ status: 'COMPLETE', id: null, stage: '' });
+      addToast('success', 'Question generated.');
+    } catch (e: any) {
+      if (currentGenId.current === genId) {
+        setGenState({ status: 'FAILED', id: null, stage: '' });
+        addToast('error', 'Failed to generate question.');
+      }
+    }
   };
 
   const initBoard = () => {
@@ -176,145 +317,13 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     })));
   };
 
-  const handleSave = async () => {
-    if (isLocked || isSaving) return;
-    soundService.playClick();
-    
-    const atIso = new Date().toISOString();
-    logger.info("template_save_click", { templateId: initialTemplate?.id || 'new', showId, ts: atIso });
-
-    setIsSaving(true);
-    try {
-      await new Promise(r => setTimeout(r, 400));
-      const validatedCategories = categories.map(cat => {
-        if (cat.questions.some(q => q.isDoubleOrNothing)) return cat;
-        const lucky = Math.floor(Math.random() * cat.questions.length);
-        return {
-          ...cat,
-          questions: cat.questions.map((q, i) => ({...q, isDoubleOrNothing: i === lucky}))
-        };
-      });
-
-      const normalizedPlayerNames = playerNames.map(n => normalizePlayerName(n)).filter(n => !!n);
-
-      if (initialTemplate) {
-        dataService.updateTemplate({
-          ...initialTemplate,
-          topic: config.title,
-          categories: validatedCategories,
-          config: {
-            playerCount: normalizedPlayerNames.length,
-            playerNames: normalizedPlayerNames,
-            categoryCount: validatedCategories.length,
-            rowCount: validatedCategories[0]?.questions.length || config.rowCount,
-            pointScale: config.pointScale
-          }
-        });
-      } else {
-        dataService.createTemplate(showId, config.title, {
-          playerCount: normalizedPlayerNames.length,
-          playerNames: normalizedPlayerNames,
-          categoryCount: validatedCategories.length,
-          rowCount: validatedCategories[0]?.questions.length || config.rowCount,
-          pointScale: config.pointScale
-        }, validatedCategories);
-      }
-      
-      logger.info("template_save_success", { templateId: initialTemplate?.id || 'new', ts: new Date().toISOString() });
-      addToast('success', 'Template saved successfully.');
-      onSave();
-    } catch (e: any) {
-      logger.error("template_save_failed", { message: e.message, ts: new Date().toISOString() });
-      addToast('error', 'Save failed — please retry');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const startAiGeneration = (stage: string) => {
-    const genId = crypto.randomUUID();
-    currentGenId.current = genId;
-    snapshotRef.current = [...categories];
-    setGenState({ status: 'GENERATING', id: genId, stage });
-    return genId;
-  };
-
-  const handleAiFillBoard = async (prompt: string, difficulty: Difficulty) => {
-    if (!prompt.trim() || isLocked) return;
-    const genId = startAiGeneration('Populating entire board...');
-    try {
-      const generatedCats = await generateTriviaGame(prompt, difficulty, config.catCount, config.rowCount, config.pointScale, genId);
-      if (currentGenId.current !== genId) return;
-      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
-      guardedSetCategories(generatedCats, { source: 'AI_GENERATION', genId });
-      setConfig(prev => ({...prev, title: prompt}));
-      setGenState({ status: 'COMPLETE', id: null, stage: '' });
-      addToast('success', 'Board populated by AI.');
-    } catch (e: any) {
-      if (currentGenId.current === genId) {
-        setGenState({ status: 'FAILED', id: null, stage: '' });
-        if (snapshotRef.current) setCategories(snapshotRef.current);
-        addToast('error', 'AI Generation failed.');
-      }
-    }
-  };
-
-  const handleAiRewriteCategory = async (cIdx: number) => {
-    if (isLocked) return;
-    soundService.playClick();
-    const genId = startAiGeneration(`Rewriting category: ${categories[cIdx].title}`);
-    try {
-      const cat = categories[cIdx];
-      const newQs = await generateCategoryQuestions(config.title, cat.title, cat.questions.length, aiDifficulty, config.pointScale, genId);
-      if (currentGenId.current !== genId) return;
-      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
-      const newCats = [...categories];
-      newCats[cIdx] = {
-        ...cat,
-        questions: newQs.map((nq, i) => ({ ...nq, points: (i + 1) * config.pointScale, id: cat.questions[i]?.id || nq.id }))
-      };
-      guardedSetCategories(newCats, { source: 'AI_GENERATION', genId });
-      setGenState({ status: 'COMPLETE', id: null, stage: '' });
-      addToast('success', `Category rewritten.`);
-    } catch (e: any) {
-      if (currentGenId.current === genId) {
-        setGenState({ status: 'FAILED', id: null, stage: '' });
-        addToast('error', 'AI Failed to rewrite category.');
-      }
-    }
-  };
-
-  const handleMagicCell = async (cIdx: number, qIdx: number) => {
-    if (isLocked) return;
-    soundService.playClick();
-    const genId = startAiGeneration('Generating question...');
-    try {
-      const cat = categories[cIdx];
-      const q = cat.questions[qIdx];
-      const result = await generateSingleQuestion(config.title, q.points, cat.title, aiDifficulty, genId);
-      if (currentGenId.current !== genId) return;
-      setGenState(prev => ({ ...prev, status: 'APPLYING' }));
-      const newCats = [...categories];
-      newCats[cIdx] = { ...newCats[cIdx], questions: [...newCats[cIdx].questions] };
-      newCats[cIdx].questions[qIdx] = { ...q, text: result.text, answer: result.answer };
-      guardedSetCategories(newCats, { source: 'AI_GENERATION', genId });
-      setGenState({ status: 'COMPLETE', id: null, stage: '' });
-      addToast('success', 'Question generated.');
-    } catch (e: any) {
-      if (currentGenId.current === genId) {
-        setGenState({ status: 'FAILED', id: null, stage: '' });
-        addToast('error', 'Failed to generate question.');
-      }
-    }
-  };
-
   const updateCell = (text: string, answer: string) => {
     if (!editCell || isLocked) return;
     const { cIdx, qIdx } = editCell;
     const newCats = [...categories];
     newCats[cIdx] = { ...newCats[cIdx], questions: [...newCats[cIdx].questions] };
     newCats[cIdx].questions[qIdx] = { ...newCats[cIdx].questions[qIdx], text, answer };
-    guardedSetCategories(newCats);
+    setCategories(newCats);
     setEditCell(null);
   };
 
@@ -322,105 +331,141 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
     if (isLocked) return;
     const newCats = [...categories];
     newCats[cIdx] = { ...newCats[cIdx], title: val };
-    guardedSetCategories(newCats);
+    setCategories(newCats);
   };
 
   if (step === 'CONFIG') {
+    // Overhauled Config View for Card 1: Viewport-fit grid layout with zero scroll on desktop
     return (
-      <div className="template-builder font-roboto font-bold fixed inset-0 z-[200] bg-black/95 flex items-center justify-center p-4">
-        <div className="w-full max-w-4xl bg-zinc-900 border border-gold-600 rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-          <div className="flex-none p-6 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50">
-             <h2 className="text-2xl font-serif text-white">New Template Configuration</h2>
-             <button onClick={onClose} className="text-zinc-500 hover:text-white"><X className="w-6 h-6" /></button>
+      <div className="template-builder font-roboto font-bold fixed inset-0 z-[200] bg-black/95 flex items-center justify-center p-0 md:p-4">
+        <div className="w-full h-full md:h-auto md:max-h-[100dvh] md:max-w-6xl bg-zinc-900 border-0 md:border md:border-gold-600 md:rounded-xl shadow-2xl grid grid-rows-[auto_1fr_auto] overflow-hidden">
+          
+          {/* HEADER */}
+          <div className="flex-none p-4 md:p-6 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50">
+             <div className="flex flex-col">
+               <h2 className="text-xl md:text-2xl font-serif text-white uppercase tracking-tight">New Template Configuration</h2>
+               <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-black mt-0.5">Production Setup Stage</p>
+             </div>
+             <button onClick={onClose} className="text-zinc-500 hover:text-white p-2 transition-colors"><X className="w-6 h-6" /></button>
           </div>
-          <div className="flex-1 overflow-y-auto p-8 custom-scrollbar pb-32">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-              <div className="space-y-8">
-                <div>
-                  <label className="block text-[10px] uppercase text-gold-500 font-black mb-2 tracking-widest">Show or Game Topic</label>
+
+          {/* BODY: Viewport fit non-scrollable grid on desktop */}
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_360px] overflow-hidden p-4 md:p-6 gap-6 md:gap-10">
+            
+            {/* LEFT COLUMN: Main Config */}
+            <div className="flex flex-col gap-6 overflow-hidden">
+                <div className="shrink-0">
+                  <label className="block text-[10px] uppercase text-gold-500 font-black mb-1.5 tracking-widest">Show or Game Topic</label>
                   <input 
                     disabled={isLocked}
                     value={config.title} onChange={e => setConfig(p => ({...p, title: e.target.value}))}
-                    className="w-full bg-black border border-zinc-700 p-4 rounded text-white focus:border-gold-500 outline-none disabled:opacity-50 text-lg font-roboto font-bold"
+                    className="w-full bg-black border border-zinc-700 p-3 md:p-4 rounded text-white focus:border-gold-500 outline-none disabled:opacity-50 text-base md:text-lg font-roboto font-bold placeholder:text-zinc-800"
                     placeholder="e.g. Science Night 2024" autoFocus
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h3 className="text-[10px] uppercase text-zinc-400 font-black border-b border-zinc-800 pb-1 tracking-widest">Dimensions</h3>
-                    <div className="flex justify-between items-center text-xs text-zinc-300 font-bold">
-                        <label>Categories</label>
-                        <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
-                          <button disabled={isLocked} onClick={() => setConfig(p => ({...p, catCount: Math.max(1, p.catCount - 1)}))} className="p-1"><Minus className="w-3 h-3 text-gold-500" /></button>
-                          <span className="w-4 text-center text-white font-mono">{config.catCount}</span>
-                          <button disabled={isLocked} onClick={() => setConfig(p => ({...p, catCount: Math.min(8, p.catCount + 1)}))} className="p-1"><Plus className="w-3 h-3 text-gold-500" /></button>
-                        </div>
+                
+                <div className="flex-1 flex flex-col gap-6 min-h-0">
+                  
+                  {/* Dimensions & Scale */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 shrink-0">
+                    <div className="space-y-3">
+                      <h3 className="text-[10px] uppercase text-zinc-400 font-black border-b border-zinc-800 pb-1 tracking-widest">Board Dimensions</h3>
+                      <div className="flex justify-between items-center text-xs text-zinc-300 font-bold">
+                          <label>Categories (Max 8)</label>
+                          <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
+                            <button disabled={isLocked} onClick={() => setConfig(p => ({...p, catCount: Math.max(1, p.catCount - 1)}))} className="p-1 hover:text-gold-500 transition-colors"><Minus className="w-3 h-3 text-gold-500" /></button>
+                            <span className="w-4 text-center text-white font-mono">{config.catCount}</span>
+                            <button disabled={isLocked} onClick={() => setConfig(p => ({...p, catCount: Math.min(8, p.catCount + 1)}))} className="p-1 hover:text-gold-500 transition-colors"><Plus className="w-3 h-3 text-gold-500" /></button>
+                          </div>
+                      </div>
+                      <div className="flex justify-between items-center text-xs text-zinc-300 font-bold">
+                          <label>Rows (Max 10)</label>
+                          <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
+                            <button disabled={isLocked} onClick={() => setConfig(p => ({...p, rowCount: Math.max(1, p.rowCount - 1)}))} className="p-1 hover:text-gold-500 transition-colors"><Minus className="w-3 h-3 text-gold-500" /></button>
+                            <span className="w-4 text-center text-white font-mono">{config.rowCount}</span>
+                            <button disabled={isLocked} onClick={() => setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))} className="p-1 hover:text-gold-500 transition-colors"><Plus className="w-3 h-3 text-gold-500" /></button>
+                          </div>
+                      </div>
                     </div>
-                    <div className="flex justify-between items-center text-xs text-zinc-300 font-bold">
-                        <label>Rows</label>
-                        <div className="flex items-center gap-2 bg-black p-1 rounded border border-zinc-800">
-                          <button disabled={isLocked} onClick={() => setConfig(p => ({...p, rowCount: Math.max(1, p.rowCount - 1)}))} className="p-1"><Minus className="w-3 h-3 text-gold-500" /></button>
-                          <span className="w-4 text-center text-white font-mono">{config.rowCount}</span>
-                          <button disabled={isLocked} onClick={() => setConfig(p => ({...p, rowCount: Math.min(10, p.rowCount + 1)}))} className="p-1"><Plus className="w-3 h-3 text-gold-500" /></button>
-                        </div>
-                    </div>
-                    <div className="space-y-2 mt-4">
+                    
+                    <div className="space-y-2">
                        <label className="text-[10px] uppercase text-zinc-500 font-black tracking-widest block">Points Increment</label>
                        <div className="flex flex-wrap gap-1">
                           {[10, 20, 25, 50, 100].map(val => (
-                             <button key={val} type="button" disabled={isLocked} onClick={() => handlePointScaleChange(val)} className={`flex-1 min-w-[40px] py-2 rounded text-[10px] font-bold border transition-all ${config.pointScale === val ? 'bg-gold-600 border-gold-500 text-black' : 'bg-black border-zinc-800 text-zinc-500 hover:border-zinc-600'}`}>{val}</button>
+                             <button key={val} type="button" disabled={isLocked} onClick={() => handlePointScaleChange(val)} className={`flex-1 min-w-[40px] py-1.5 md:py-2 rounded text-[10px] font-bold border transition-all ${config.pointScale === val ? 'bg-gold-600 border-gold-500 text-black' : 'bg-black border-zinc-800 text-zinc-500 hover:border-zinc-600'}`}>{val}</button>
                           ))}
                        </div>
                        <p className="text-[9px] text-zinc-500 font-mono italic">Range: {config.pointScale} - {config.pointScale * config.rowCount} pts</p>
                     </div>
                   </div>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center border-b border-zinc-800 pb-1">
-                       <h3 className="text-[10px] uppercase text-zinc-400 font-black tracking-widest">Contestants</h3>
-                       <button onClick={() => setPlayerNames([...playerNames, `PLAYER ${playerNames.length + 1}`])} className="text-[10px] text-gold-500 hover:text-white font-bold"><Plus className="w-3 h-3 inline" /> ADD</button>
+
+                  {/* Contestants (Card 1 Fix: Always visible 2-column grid, no scroll) */}
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <div className="flex justify-between items-center border-b border-zinc-800 pb-1 mb-3">
+                       <h3 className="text-[10px] uppercase text-zinc-400 font-black tracking-widest">Contestants (Max 8)</h3>
+                       <button 
+                         disabled={playerConfigs.length >= MAX_PLAYERS || isLocked} 
+                         onClick={handleAddPlayer} 
+                         className="text-[10px] text-gold-500 hover:text-white font-bold disabled:opacity-30 transition-all flex items-center gap-1"
+                       >
+                         <Plus className="w-3 h-3" /> {playerConfigs.length >= MAX_PLAYERS ? 'MAX 8 REACHED' : 'ADD PLAYER'}
+                       </button>
                     </div>
-                    <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
-                       {playerNames.map((name, idx) => (
-                         <div key={idx} className="flex gap-2">
-                            <input value={name.toUpperCase()} onChange={(e) => { const n = [...playerNames]; n[idx] = normalizePlayerName(e.target.value); setPlayerNames(n); }} className="flex-1 bg-black border border-zinc-800 p-2 rounded text-white text-xs font-roboto font-bold" />
-                            <button onClick={() => setPlayerNames(playerNames.filter((_, i) => i !== idx))} className="text-zinc-600 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                    
+                    {/* Deterministic 2-column grid ensures all 8 visible without scroll on desktop */}
+                    <div className="grid grid-cols-2 gap-2 overflow-visible auto-rows-[clamp(36px,4vh,48px)]">
+                       {playerConfigs.map((p) => (
+                         <div key={p.id} className="flex gap-2 items-center bg-black/40 border border-zinc-800/50 p-1 px-3 rounded-lg h-full group transition-colors hover:border-zinc-700">
+                            <input 
+                              value={p.name.toUpperCase()} 
+                              onChange={(e) => handlePlayerNameChange(p.id, e.target.value)} 
+                              className="flex-1 bg-transparent text-white text-[11px] md:text-xs font-roboto-bold outline-none placeholder:text-zinc-800 uppercase tracking-tight" 
+                              placeholder="ENTER NAME"
+                            />
+                            <button onClick={() => handleDeletePlayer(p.id)} className="text-zinc-700 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1.5" title="Remove Player"><Trash2 className="w-3.5 h-3.5" /></button>
                          </div>
                        ))}
                     </div>
                   </div>
                 </div>
-                <div className="pt-4">
-                   <button onClick={initBoard} disabled={!config.title || isLocked} className="w-full py-4 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 font-roboto font-bold hover:bg-zinc-700 hover:text-white transition-all uppercase tracking-widest text-sm flex items-center justify-center gap-2">
-                     Start Building
+
+                {/* Transition to board */}
+                <div className="shrink-0 pt-4 border-t border-zinc-800/30">
+                   <button onClick={initBoard} disabled={!config.title || isLocked} className="w-full py-4 rounded bg-zinc-800 border border-zinc-700 text-gold-500 font-roboto font-bold hover:bg-zinc-700 hover:text-white transition-all uppercase tracking-[0.2em] text-xs flex items-center justify-center gap-3 shadow-xl shadow-black/40 active:scale-95">
+                     <Edit className="w-4 h-4" /> Start Manual Studio Building
                    </button>
                 </div>
-              </div>
-              <div className="bg-black/40 border border-purple-500/20 rounded-xl p-6 space-y-6 flex flex-col relative overflow-hidden group">
+            </div>
+
+            {/* RIGHT COLUMN: AI Magic Studio */}
+            <div className="hidden lg:flex flex-col bg-black/40 border border-purple-500/20 rounded-xl p-6 space-y-6 relative overflow-hidden group">
                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity pointer-events-none">
-                    <Sparkles className="w-24 h-24 text-purple-500" />
+                    <Sparkles className="w-32 h-32 text-purple-500" />
                  </div>
-                 <div>
-                    <h3 className="text-sm uppercase text-purple-400 font-roboto font-bold flex items-center gap-2 tracking-widest mb-1"><Sparkles className="w-4 h-4" /> AI Magic Studio</h3>
-                    <p className="text-xs text-zinc-500 leading-relaxed font-bold">Skip manual entry. Generate a full board based on your topic instantly.</p>
+                 <div className="relative z-10">
+                    <h3 className="text-sm uppercase text-purple-400 font-roboto font-bold flex items-center gap-2 tracking-widest mb-2"><Sparkles className="w-4 h-4" /> AI Magic Studio</h3>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed font-bold">Automate the entire production. Enter a topic and let Gemini generate all categories and questions instantly.</p>
                  </div>
-                 <div className="space-y-4 relative z-10">
+                 <div className="space-y-5 relative z-10 flex-1 min-h-0">
                     <div>
-                       <label className="block text-[10px] uppercase text-zinc-500 font-black mb-1.5">Topic for AI</label>
+                       <label className="block text-[10px] uppercase text-zinc-500 font-black mb-2 tracking-widest">Topic for AI Board</label>
                        <input 
                          value={aiPrompt}
                          onChange={e => setAiPrompt(e.target.value)}
-                         placeholder="Enter topic (e.g. 90s Pop Culture)"
-                         className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded text-white text-sm outline-none focus:border-purple-500 font-roboto font-bold"
+                         placeholder="e.g. 90s Pop Culture"
+                         className="w-full bg-zinc-900 border border-zinc-800 p-3 rounded text-white text-sm outline-none focus:border-purple-500 font-roboto font-bold placeholder:text-zinc-700"
                        />
                     </div>
                     <div>
-                       <label className="block text-[10px] uppercase text-zinc-500 font-black mb-1.5">Select Difficulty</label>
-                       <div className="grid grid-cols-4 gap-2">
+                       <label className="block text-[10px] uppercase text-zinc-500 font-black mb-2 tracking-widest">Game Difficulty</label>
+                       <div className="grid grid-cols-2 gap-2">
                           {(['easy', 'medium', 'hard', 'mixed'] as Difficulty[]).map(d => (
-                             <button key={d} type="button" onClick={() => setAiDifficulty(d)} className={`py-2 rounded text-[10px] font-roboto font-bold uppercase border transition-all ${aiDifficulty === d ? 'bg-purple-600 border-purple-400 text-white shadow-lg' : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-600'}`}>{d}</button>
+                             <button key={d} type="button" onClick={() => setAiDifficulty(d)} className={`py-2 rounded text-[10px] font-roboto font-bold uppercase border transition-all ${aiDifficulty === d ? 'bg-purple-600 border-purple-400 text-white shadow-lg' : 'bg-zinc-900 border-zinc-800 text-zinc-600 hover:border-zinc-700'}`}>{d}</button>
                           ))}
                        </div>
                     </div>
+                 </div>
+                 <div className="relative z-10 pt-4">
                     <button 
                       onClick={() => {
                         if (aiPrompt) {
@@ -435,16 +480,17 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                         }
                       }}
                       disabled={!aiPrompt || isLocked}
-                      className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-roboto font-bold rounded shadow-xl flex items-center justify-center gap-3 transition-all disabled:opacity-30 uppercase tracking-widest text-sm"
+                      className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-roboto font-bold rounded shadow-xl flex items-center justify-center gap-3 transition-all disabled:opacity-30 uppercase tracking-[0.15em] text-xs active:scale-95"
                     >
-                      <Sparkles className="w-5 h-5" /> Generate Full Board
+                      <Sparkles className="w-5 h-5" /> Generate Complete Board
                     </button>
                  </div>
-              </div>
             </div>
           </div>
-          <div className="flex-none p-6 border-t border-zinc-800 bg-zinc-950/50 flex gap-4">
-             <button onClick={onClose} className="flex-1 py-4 rounded border border-zinc-800 text-zinc-500 font-roboto font-bold uppercase tracking-widest text-xs hover:bg-zinc-900 transition-colors">Cancel</button>
+
+          {/* FOOTER: Static row at the bottom, no overlap */}
+          <div className="flex-none p-4 md:p-6 border-t border-zinc-800 bg-zinc-950/50 flex gap-4">
+             <button onClick={onClose} className="flex-1 py-3 md:py-4 rounded border border-zinc-800 text-zinc-500 font-roboto font-bold uppercase tracking-widest text-[10px] hover:bg-zinc-900 hover:text-white transition-colors">Cancel Production Setup</button>
           </div>
         </div>
       </div>
@@ -473,17 +519,25 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
           </div>
         </div>
 
-        <div className="flex items-center gap-4 ml-4">
+        {/* Builder High-Priority Actions Stacking */}
+        <div data-testid="builder-actions-row" className="flex flex-col items-end gap-1 ml-4 z-[60]">
            {onLogout && (
              <button 
                onClick={() => { soundService.playClick(); onClose(); onLogout(); }}
-               className="hidden md:flex text-[9px] uppercase font-black text-red-500 hover:text-red-400 items-center gap-1 transition-colors px-1"
+               className="text-[9px] uppercase font-black text-red-500 hover:text-red-400 items-center gap-1 transition-colors px-1 flex"
              >
-               <LogOut className="w-3 h-3" /> Logout Producer
+               <LogOut className="w-2.5 h-2.5" /> Logout
              </button>
            )}
-           <button onClick={() => setStep('CONFIG')} className="hidden md:flex items-center gap-2 text-xs uppercase font-black text-zinc-400 hover:text-white transition-colors border border-zinc-800 px-3 py-1.5 rounded">
-             <Hash className="w-3.5 h-3.5" /> Structure
+           <button 
+             ref={saveBtnRef}
+             disabled={isLocked || isSaving} 
+             onClick={handleSave} 
+             data-testid="save-template-button"
+             className="bg-gold-600 hover:bg-gold-500 text-black font-roboto font-bold px-4 md:px-6 py-2 rounded-lg flex items-center gap-2 shadow-xl transition-all active:scale-95 border-b-2 border-gold-800"
+           >
+             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+             <span className="uppercase text-[10px] tracking-wider font-black">Save Template</span>
            </button>
         </div>
       </header>
@@ -538,27 +592,6 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                <Sparkles className="w-4 h-4 text-gold-500 animate-pulse" />
                <h3 className="text-sm font-roboto font-bold text-white uppercase tracking-widest">Live Builder Preview</h3>
             </div>
-            
-            <div className="flex items-center gap-3">
-              {onLogout && (
-                <button 
-                  onClick={() => { soundService.playClick(); onClose(); onLogout(); }}
-                  className="md:hidden text-[9px] uppercase font-black text-red-500 px-2 py-1"
-                >
-                  Logout
-                </button>
-              )}
-              <button 
-                ref={saveBtnRef}
-                disabled={isLocked || isSaving} 
-                onClick={handleSave} 
-                data-testid="save-template-button"
-                className="bg-gold-600 hover:bg-gold-500 text-black font-roboto font-bold px-6 py-2 rounded-lg flex items-center gap-2 shadow-xl transition-all active:scale-95 border-b-2 border-gold-800"
-              >
-                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                <span className="uppercase text-[10px] tracking-wider font-black">Save Template</span>
-              </button>
-            </div>
           </div>
 
           <div className="p-4 md:p-8">
@@ -570,9 +603,9 @@ export const TemplateBuilder: React.FC<Props> = ({ showId, initialTemplate, onCl
                     {!isLocked && <button onClick={() => handleAiRewriteCategory(cIdx)} className="absolute -top-1 -right-1 p-1 bg-purple-600 rounded-full text-white opacity-0 group-hover/header:opacity-100 transition-opacity shadow-lg z-10" title="AI Regenerate Category"><Sparkles className="w-3.5 h-3.5" /></button>}
                   </div>
                   {cat.questions.map((q, qIdx) => (
-                    <div key={q.id} onClick={() => { if(!isLocked) { soundService.playSelect(); setEditCell({cIdx, qIdx}); } }} className={`bg-zinc-900 border border-zinc-800 hover:border-gold-500 text-gold-400 font-roboto font-bold flex-1 flex flex-col items-center justify-center rounded min-h-[48px] md:min-h-[52px] relative group transition-all ${isLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer active:scale-95 shadow-md hover:shadow-gold-500/10'}`}>
-                      <span className={`text-[clamp(12px,1.5vw,16px)] font-roboto font-bold ${q.isDoubleOrNothing ? 'text-red-500' : ''}`}>{q.points}</span>
-                      {q.isDoubleOrNothing && <div className="absolute top-0.5 right-0.5 text-[7px] bg-red-900 text-white px-0.5 rounded font-roboto font-bold">2X</div>}
+                    <div key={q.id} onClick={() => { if(!isLocked) { soundService.playSelect(); setEditCell({cIdx, qIdx}); } }} className={`bg-zinc-900 border border-zinc-800 hover:border-gold-500 text-gold-400 font-roboto-bold flex-1 flex flex-col items-center justify-center rounded min-h-[48px] md:min-h-[52px] relative group transition-all ${isLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer active:scale-95 shadow-md hover:shadow-gold-500/10'}`}>
+                      <span className={`text-[clamp(12px,1.5vw,16px)] font-roboto-bold ${q.isDoubleOrNothing ? 'text-red-500' : ''}`}>{q.points}</span>
+                      {q.isDoubleOrNothing && <div className="absolute top-0.5 right-0.5 text-[7px] bg-red-900 text-white px-0.5 rounded font-roboto-bold">2X</div>}
                       {(q.text && q.text !== 'Enter question text...') && <div className="absolute bottom-1 right-1 w-1.5 h-1.5 bg-green-500 rounded-full" />}
                       {!isLocked && <button onClick={(e) => { e.stopPropagation(); handleMagicCell(cIdx, qIdx); }} className="absolute bottom-1 left-1 p-0.5 bg-purple-900/50 rounded text-purple-200 opacity-0 group-hover:opacity-100 transition-opacity" title="Quick AI Generate"><Sparkles className="w-2.5 h-2.5" /></button>}
                     </div>
