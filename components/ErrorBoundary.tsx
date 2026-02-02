@@ -1,4 +1,3 @@
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { logger } from '../services/logger';
 
@@ -14,7 +13,7 @@ interface State {
 /**
  * ErrorBoundary component to catch and handle uncaught errors in the React component tree.
  */
-// Fix: Explicitly extending Component from 'react' to ensure TypeScript correctly resolves inherited members like setState and props.
+// Fix: Importing and extending Component directly from 'react' to ensure TypeScript correctly resolves inherited members like setState and props.
 export class ErrorBoundary extends Component<Props, State> {
   // Explicitly initialize state property.
   public state: State = {
@@ -40,7 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   public render(): ReactNode {
-    // Fix: Accessing state inherited from Component base class.
+    // Fix: state is now correctly recognized as inherited from the Component base class.
     if (this.state.hasError) {
       // Render fallback studio failure UI.
       return (
@@ -69,7 +68,7 @@ export class ErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // Fix: props.children is now correctly recognized as inherited from the Component base class.
+    // Fix: props is now correctly recognized as inherited from the Component base class.
     return this.props.children;
   }
 }

@@ -1,8 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Plus, Minus, Maximize2, Minimize2 } from 'lucide-react';
 import { Player, BoardViewSettings } from '../types';
 import { soundService } from '../services/soundService';
+import { logger } from '../services/logger';
 
 interface Props {
   players: Player[];
@@ -26,9 +27,74 @@ export const Scoreboard: React.FC<Props> = ({
 }) => {
   const [newName, setNewName] = useState('');
   const [isCondensed, setIsCondensed] = useState(false);
+  
+  // Measurement for Desktop Fit Logic
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const [fitMetrics, setFitMetrics] = useState({
+    rowHeight: 56,
+    fontSize: 20,
+    gap: 8
+  });
 
   const fontScale = viewSettings?.boardFontScale || 1.0;
   const scoreboardScale = viewSettings?.scoreboardScale || 1.0;
+
+  // AUTO-FIT CALCULATION (DESKTOP/WEB ONLY)
+  useLayoutEffect(() => {
+    const measureAndCompute = () => {
+      if (!listContainerRef.current) return;
+      
+      const isDesktop = window.innerWidth >= 1024;
+      if (!isDesktop) return;
+
+      try {
+        const rect = listContainerRef.current.getBoundingClientRect();
+        const availableHeight = rect.height;
+        const playerCount = players.length || 1;
+
+        if (availableHeight <= 0) {
+          logger.warn("scoreboard_fit_fallback", { playerCount, ts: new Date().toISOString() });
+          setFitMetrics({ rowHeight: 56, fontSize: 20, gap: 8 });
+          return;
+        }
+
+        // Reserve space for padding/borders (approx 20px)
+        const effectiveHeight = availableHeight - 20;
+        
+        // Calculate dynamic dimensions
+        const calculatedRow = effectiveHeight / playerCount;
+        // Clamp: Min 36px (compact but readable), Max 88px (aesthetic ceiling)
+        const rowHeight = Math.max(36, Math.min(calculatedRow, 88));
+        
+        // Scale font and gap relative to row height
+        const fontSize = Math.max(12, Math.min(rowHeight * 0.35, 30));
+        const gap = Math.max(4, Math.min(rowHeight * 0.12, 14));
+
+        setFitMetrics({ rowHeight, fontSize, gap });
+        
+        logger.info("scoreboard_fit_compute", {
+          playerCount,
+          availableHeight,
+          rowHeight,
+          fontSize,
+          ts: new Date().toISOString()
+        });
+      } catch (err: any) {
+        logger.error("scoreboard_fit_error", { message: err.message, ts: new Date().toISOString() });
+      }
+    };
+
+    measureAndCompute();
+    
+    const observer = new ResizeObserver(measureAndCompute);
+    if (listContainerRef.current) observer.observe(listContainerRef.current);
+    window.addEventListener('resize', measureAndCompute);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measureAndCompute);
+    };
+  }, [players.length]);
 
   const handleAddManual = () => {
     if (newName.trim()) {
@@ -41,11 +107,14 @@ export const Scoreboard: React.FC<Props> = ({
   const scoreboardStyles = {
     '--scoreboard-scale': scoreboardScale,
     '--board-font-scale': fontScale,
+    '--sb-row-h': `${fitMetrics.rowHeight}px`,
+    '--sb-font': `${fitMetrics.fontSize}px`,
+    '--sb-gap': `${fitMetrics.gap}px`,
   } as React.CSSProperties;
 
   return (
     <div 
-      className="h-auto lg:h-full flex flex-col border-t lg:border-t-0 lg:border-l border-gold-900/30 bg-black/95 w-full lg:w-[clamp(18rem,20vw*var(--scoreboard-scale),30rem)] shadow-2xl z-20 font-sans font-bold select-none transition-all duration-300"
+      className="h-auto lg:h-full flex flex-col border-t lg:border-t-0 lg:border-l border-gold-900/30 bg-black/95 w-full lg:w-[clamp(18rem,20vw*var(--scoreboard-scale),30rem)] shadow-2xl z-20 font-sans font-bold select-none transition-all duration-300 overflow-hidden overscroll-behavior-none"
       style={scoreboardStyles}
     >
       
@@ -63,8 +132,15 @@ export const Scoreboard: React.FC<Props> = ({
         </button>
       </div>
 
-      {/* Players List */}
-      <div className={`flex-1 overflow-y-auto p-2 space-y-2 md:space-y-3 custom-scrollbar max-h-[300px] lg:max-h-none ${isCondensed ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:flex lg:flex-col gap-2 space-y-0' : ''}`} style={{ padding: `calc(0.5rem * var(--scoreboard-scale))` }}>
+      {/* Players List - Scroll strictly disabled on desktop via lg:overflow-hidden */}
+      <div 
+        ref={listContainerRef}
+        className={`flex-1 overflow-y-auto lg:overflow-hidden p-2 custom-scrollbar max-h-[300px] lg:max-h-none ${isCondensed ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:flex lg:flex-col gap-2 space-y-0' : 'space-y-[var(--sb-gap,8px)]'}`} 
+        style={{ 
+          padding: `calc(0.5rem * var(--scoreboard-scale))`,
+          scrollbarWidth: 'none'
+        }}
+      >
         {players.map(p => {
           const isSelected = p.id === selectedPlayerId;
           const starsCount = p.wildcardsUsed || 0;
@@ -76,19 +152,25 @@ export const Scoreboard: React.FC<Props> = ({
               key={p.id} 
               onClick={() => onSelectPlayer(p.id)}
               className={`
-                relative p-2 md:p-3 rounded border transition-all duration-200 cursor-pointer group flex flex-col gap-1.5 md:gap-2
+                relative p-2 md:p-3 rounded border transition-all duration-200 cursor-pointer group flex flex-col justify-center
                 ${isSelected 
                   ? 'bg-gold-900/30 border-gold-500 shadow-[0_0_15px_rgba(255,215,0,0.2)] scale-[1.01] lg:scale-[1.02]' 
                   : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600'}
                 ${isCondensed ? 'p-1.5 md:p-2' : ''}
               `}
-              style={{ minHeight: isCondensed ? 'auto' : `calc(4rem * var(--scoreboard-scale))` }}
+              style={{ 
+                height: isCondensed ? 'auto' : 'var(--sb-row-h, 4rem)',
+                minHeight: '36px'
+              }}
             >
               <div className={`flex justify-between items-center ${isCondensed ? 'flex-col lg:flex-row items-start lg:items-center' : ''}`}>
                 <div className="flex items-center min-w-0 flex-1 mr-2 overflow-hidden gap-1.5 md:gap-2">
                   <span 
                     className={`truncate pr-1 font-roboto font-bold tracking-wide ${isSelected ? 'text-white' : 'text-zinc-400'}`} 
-                    style={{ fontSize: `calc(clamp(14px, 1.4vw, 30px) * var(--scoreboard-scale))` }}
+                    style={{ 
+                      fontSize: isCondensed ? 'auto' : 'var(--sb-font, 18px)',
+                      whiteSpace: 'nowrap'
+                    }}
                   >
                     {isCondensed ? displayName.split(' ')[0] : displayName}
                   </span>
@@ -98,7 +180,7 @@ export const Scoreboard: React.FC<Props> = ({
                       className="shrink-0 drop-shadow-md leading-none"
                       style={{ 
                         color: STAR_COLOR_BY_COUNT[Math.min(starsCount, 4)] || '#FFD400',
-                        fontSize: `calc(clamp(10px, 1vw, 24px) * var(--scoreboard-scale))`
+                        fontSize: 'calc(var(--sb-font) * 0.7)'
                       }}
                     >
                       {'★'.repeat(Math.min(starsCount, 4))}
@@ -107,32 +189,35 @@ export const Scoreboard: React.FC<Props> = ({
                   {!isCondensed && stealsCount > 0 && (
                     <span 
                       className="shrink-0 text-[8px] md:text-[10px] bg-purple-900/50 text-purple-200 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider border border-purple-500/30"
-                      style={{ fontSize: `calc(clamp(8px, 0.8vw, 14px) * var(--scoreboard-scale))` }}
+                      style={{ fontSize: 'calc(var(--sb-font) * 0.5)' }}
                     >
                       S:{stealsCount}
                     </span>
                   )}
                 </div>
-                <span className={`font-mono font-black text-gold-400 drop-shadow-md ${isCondensed ? 'mt-1 lg:mt-0' : ''}`} style={{ fontSize: isCondensed ? '0.9rem' : `calc(1.2rem * var(--scoreboard-scale) * var(--board-font-scale))` }}>
+                <span 
+                  className={`font-mono font-black text-gold-400 drop-shadow-md ${isCondensed ? 'mt-1 lg:mt-0' : ''}`} 
+                  style={{ fontSize: isCondensed ? '0.9rem' : 'calc(var(--sb-font) * 1.1)' }}
+                >
                   {p.score}
                 </span>
               </div>
               
-              {!isCondensed && (
-                <div className="flex gap-2 h-7 md:h-8" style={{ height: `calc(2rem * var(--scoreboard-scale))` }}>
+              {!isCondensed && fitMetrics.rowHeight > 54 && (
+                <div className="flex gap-2 mt-1 h-6 md:h-7 opacity-0 group-hover:opacity-100 transition-opacity">
                    <button 
                      type="button"
                      onClick={(e) => { e.stopPropagation(); soundService.playClick(); onUpdateScore(p.id, -100); }} 
-                     className="flex-1 bg-zinc-950/80 border border-zinc-800 text-red-500 hover:border-red-500 hover:bg-red-900/20 rounded flex items-center justify-center transition-colors min-h-[36px]"
+                     className="flex-1 bg-zinc-950/80 border border-zinc-800 text-red-500 hover:border-red-500 hover:bg-red-900/20 rounded flex items-center justify-center transition-colors"
                    >
-                     <Minus className="w-4 h-4" />
+                     <Minus className="w-3 h-3" />
                    </button>
                    <button 
                      type="button"
                      onClick={(e) => { e.stopPropagation(); soundService.playClick(); onUpdateScore(p.id, 100); }} 
-                     className="flex-1 bg-zinc-950/80 border border-zinc-800 text-green-500 hover:border-green-500 hover:bg-green-900/20 rounded flex items-center justify-center transition-colors min-h-[36px]"
+                     className="flex-1 bg-zinc-950/80 border border-zinc-800 text-green-500 hover:border-green-500 hover:bg-green-900/20 rounded flex items-center justify-center transition-colors"
                    >
-                     <Plus className="w-4 h-4" />
+                     <Plus className="w-3 h-3" />
                    </button>
                 </div>
               )}
