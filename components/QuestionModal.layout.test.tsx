@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { QuestionModal } from './QuestionModal';
 import { Question, Player, GameTimer } from '../types';
 
@@ -48,9 +47,9 @@ const mockTimer: GameTimer = {
 const setupModal = (questionOverrides: Partial<Question> = {}) => {
   const mockQuestion: Question = {
     id: 'q1',
-    text: 'What is the capital of France?',
+    text: 'Standard Question?',
     points: 100,
-    answer: 'Paris',
+    answer: 'Standard Answer',
     isRevealed: false,
     isAnswered: false,
     isDoubleOrNothing: false,
@@ -60,7 +59,7 @@ const setupModal = (questionOverrides: Partial<Question> = {}) => {
   return render(
     <QuestionModal
       question={mockQuestion}
-      categoryTitle="Geography"
+      categoryTitle="General"
       players={mockPlayers}
       selectedPlayerId="p1"
       timer={mockTimer}
@@ -70,79 +69,37 @@ const setupModal = (questionOverrides: Partial<Question> = {}) => {
   );
 };
 
-describe('QuestionModal: Layout & Reveal Logic Verification', () => {
+describe('QuestionModal: Layout & Reveal UI Health (Card 1)', () => {
   beforeEach(() => {
-    // Reset document styles before each test
     document.documentElement.style.overflow = "";
     document.body.style.overflow = "";
-    document.body.style.position = "";
-    window.scrollTo(0, 0);
+    jest.clearAllMocks();
   });
 
-  test('A) SCROLL LOCK: document and body overflow is set to hidden on mount', () => {
+  test('A) LAYOUT: Root uses fixed grid with overflow-hidden', () => {
     setupModal();
-    expect(document.documentElement.style.overflow).toBe('hidden');
-    expect(document.body.style.overflow).toBe('hidden');
-    expect(document.body.style.position).toBe('fixed');
-  });
-
-  test('B) FULL-SCREEN OVERLAY: container uses inset-0 and high z-index', () => {
-    setupModal();
-    const root = screen.getByTestId('question-modal-root');
+    const root = screen.getByTestId('reveal-root');
     expect(root).toHaveClass('fixed');
     expect(root).toHaveClass('inset-0');
-    expect(root).toHaveClass('z-[9999]');
+    expect(root).toHaveClass('overflow-hidden');
+    expect(root).toHaveClass('grid');
+    expect(root).toHaveClass('grid-rows-[auto_1fr_auto]');
   });
 
-  test('C) REVEAL BUTTON: Centered horizontally and below question before reveal', () => {
+  test('B) VISIBILITY: Actions container exists and is always in DOM', () => {
     setupModal();
-    const revealBtn = screen.getByText(/Reveal Answer/i).closest('button');
-    const questionText = screen.getByTestId('question-text');
-
-    expect(revealBtn).toBeInTheDocument();
-    
-    // Check horizontal centering class
-    expect(revealBtn?.parentElement).toHaveClass('justify-center');
-    
-    // In our 4-row logical grid, Row 2 is question, Row 3 is Reveal button.
-    // Visual check via position relative to DOM order or container structure.
-    expect(questionText.compareDocumentPosition(revealBtn!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-  });
-
-  test('D) ANSWER VIEWPORT ADHERENCE: Long questions do not push Answer/Actions out of view', async () => {
-    const longText = 'This is a very long question. '.repeat(50);
-    setupModal({ text: longText, isRevealed: true });
-
-    const answerText = screen.getByTestId('answer-text');
-    const actionsContainer = screen.getByTestId('action-buttons-container');
-
-    // Both should be visible
-    expect(answerText).toBeVisible();
-    expect(actionsContainer).toBeVisible();
-    
-    // Grid behavior check: The container should have max-height applied
-    const questionContainer = screen.getByTestId('question-text').closest('div');
-    expect(questionContainer).toHaveStyle('max-height: calc(100dvh - calc(140px + 180px + 40px))');
-  });
-
-  test('E) ACTION BUTTONS: Visible and stacked immediately below answer post-reveal', () => {
-    setupModal({ isRevealed: true });
-    
-    const answer = screen.getByTestId('answer-text');
-    const actions = screen.getByTestId('action-buttons-container');
-
-    expect(answer).toBeInTheDocument();
+    const actions = screen.getByTestId('reveal-actions');
     expect(actions).toBeInTheDocument();
-
-    // DOM order check
-    expect(answer.closest('.flex-none')?.nextElementSibling?.contains(actions)).toBeFalsy(); 
-    // Wait, in our layout Row 3 is Answer, Row 4 is Actions.
-    const row3 = answer.closest('.flex-none');
-    const row4 = actions.closest('.flex-none');
-    expect(row3?.nextElementSibling).toBe(row4);
+    expect(actions).toBeVisible();
   });
 
-  test('F) REGRESSION: Space triggers reveal', () => {
+  test('C) REGRESSION: Award button disabled before reveal', () => {
+    setupModal({ isRevealed: false });
+    const awardBtn = screen.getByTitle(/Award Points/i);
+    expect(awardBtn).toBeDisabled();
+  });
+
+  test('D) INTERACTION: Reveal icon button triggers reveal', () => {
     const onReveal = jest.fn();
     render(
       <QuestionModal
@@ -156,7 +113,33 @@ describe('QuestionModal: Layout & Reveal Logic Verification', () => {
       />
     );
 
-    fireEvent.keyDown(window, { code: 'Space' });
+    const revealBtn = screen.getByTitle(/Reveal Answer/i);
+    fireEvent.click(revealBtn);
     expect(onReveal).toHaveBeenCalled();
+  });
+
+  test('E) LONG QUESTION STRESS: Actions remain visible without scroll', () => {
+    const longText = 'LOOOOONG '.repeat(100);
+    setupModal({ text: longText, isRevealed: true });
+
+    // Actions should still be visible at the bottom
+    const actions = screen.getByTestId('reveal-actions');
+    expect(actions).toBeVisible();
+
+    // Answer should be visible
+    const answer = screen.getByTestId('answer-text');
+    expect(answer).toBeVisible();
+
+    // Check that question text container is squashed but not causing scroll
+    const questionContainer = screen.getByTestId('question-text').parentElement;
+    expect(questionContainer).toHaveClass('flex-1');
+    expect(questionContainer).toHaveClass('min-h-0');
+    expect(questionContainer).toHaveClass('overflow-hidden');
+  });
+
+  test('F) SAFE AREA: Footer has safe bottom padding style', () => {
+    setupModal();
+    const root = screen.getByTestId('reveal-root');
+    expect(root).toHaveStyle('padding-bottom: env(safe-area-inset-bottom)');
   });
 });

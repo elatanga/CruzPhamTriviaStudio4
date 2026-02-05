@@ -1,5 +1,4 @@
-
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { logger } from '../services/logger';
 
 interface Props {
@@ -14,11 +13,11 @@ interface State {
 /**
  * ErrorBoundary component to catch and handle uncaught errors in the React component tree.
  */
-// Fix: Use React.Component explicitly to ensure inherited members like setState and props are correctly resolved by TypeScript.
-export class ErrorBoundary extends React.Component<Props, State> {
-  // Fix: Added constructor with super(props) to ensure base class properties are properly initialized and inherited members are accessible.
+// Fix: Extending Component directly from React ensures that inherited properties like state and props are correctly typed.
+export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
+    // Fix: Initializing state correctly in the constructor of a React class component.
     this.state = {
       hasError: false,
       error: null
@@ -37,13 +36,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   public handleReset = () => {
     // Resetting error state and performing a hard reload to attempt recovery.
-    // Fix: Explicitly using inherited setState from React.Component base class.
+    // Fix: Using setState which is inherited from the React Component base class.
     this.setState({ hasError: false, error: null });
     window.location.reload();
   };
 
   public render(): ReactNode {
-    // Fix: Accessing inherited state from React.Component base class.
+    // Fix: Accessing state inherited from the React Component base class.
     if (this.state.hasError) {
       // Render fallback studio failure UI.
       return (
@@ -72,7 +71,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       );
     }
 
-    // Fix: Accessing inherited props from React.Component base class.
+    // Fix: Accessing props inherited from the React Component base class.
     return this.props.children;
   }
 }
