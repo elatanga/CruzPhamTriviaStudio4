@@ -682,9 +682,30 @@ export const DirectorPanel: React.FC<Props> = ({
                     <button type="button" onClick={() => handleAiRewriteCategory(cIdx)} className="text-zinc-600 hover:text-purple-400" title="AI Rewrite Category"><Wand2 className="w-3 h-3" /></button>
                   </div>
                   {cat.questions.map((q, qIdx) => (
-                    <div key={q.id} onClick={() => { soundService.playClick(); setEditingQuestion({cIdx, qIdx}); }} className={`p-3 rounded border flex flex-col gap-1 cursor-pointer transition-all hover:brightness-110 relative ${q.isVoided ? 'bg-red-900/20 border-red-800' : q.isAnswered ? 'bg-zinc-900 border-zinc-800 opacity-60' : 'bg-zinc-800 border-zinc-700'}`}>
+                    <div key={q.id} onClick={() => { 
+                        // CARD 1: Director Oversight Logging
+                        logger.info("director_view_tile", {
+                          ts: new Date().toISOString(),
+                          tileId: q.id,
+                          hasQuestion: !!q.text,
+                          hasAnswer: !!q.answer
+                        });
+                        if (!q.answer) {
+                          logger.warn("director_answer_missing", { ts: new Date().toISOString(), tileId: q.id });
+                        }
+                        soundService.playClick(); 
+                        setEditingQuestion({cIdx, qIdx}); 
+                      }} 
+                      className={`p-3 rounded border flex flex-col gap-1 cursor-pointer transition-all hover:brightness-110 relative ${q.isVoided ? 'bg-red-900/20 border-red-800' : q.isAnswered ? 'bg-zinc-900 border-zinc-800 opacity-60' : 'bg-zinc-800 border-zinc-700'}`}>
                       <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500"><span>{q.points}</span>{q.isVoided && <span className="text-red-500 font-bold uppercase">Void</span>}{q.isDoubleOrNothing && <span className="text-gold-500 font-bold">2x</span>}</div>
                       <p className="text-xs text-zinc-300 line-clamp-2 leading-tight font-bold">{q.text}</p>
+                      {/* CARD 1: Director-Only Answer Insight */}
+                      <div className="mt-2 pt-2 border-t border-zinc-700/40">
+                        <span className="text-[9px] text-zinc-500 uppercase font-black block tracking-widest leading-none mb-1">Answer</span>
+                        <p className={`text-[10px] leading-tight font-roboto-bold ${q.answer ? 'text-gold-400' : 'text-zinc-600 italic'}`}>
+                          {q.answer || '(MISSING)'}
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>
