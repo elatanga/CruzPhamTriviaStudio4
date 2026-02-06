@@ -3,6 +3,7 @@ import React, { useEffect } from 'react';
 import { Category, BoardViewSettings } from '../types';
 import { soundService } from '../services/soundService';
 import { logger } from '../services/logger';
+import { getCategoryTitleFontSize, getTileScaleFactor } from '../services/utils';
 
 interface Props {
   categories: Category[];
@@ -11,7 +12,6 @@ interface Props {
 }
 
 export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewSettings }) => {
-  // Theme Logging
   useEffect(() => {
     logger.info("trivia_board_theme_updated", { backgroundTheme: "luxury_light", atIso: new Date().toISOString() });
   }, []);
@@ -20,10 +20,8 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
   const rowCount = categories[0]?.questions.length || 5; 
 
   const boardStyles = {
-    '--board-font-scale': viewSettings?.boardFontScale || 1.0,
-    '--tile-scale': viewSettings?.tileScale || 1.0,
-    '--cat-font-scale': viewSettings?.categoryFontSizeScale || 1.0,
-    '--tile-font-scale': viewSettings?.tileFontSizeScale || 1.0,
+    '--cat-font-px': `${getCategoryTitleFontSize(viewSettings?.categoryTitleScale || 'M')}px`,
+    '--tile-scale-factor': getTileScaleFactor(viewSettings?.tileScale || 'M'),
     '--tile-padding-scale': viewSettings?.tilePaddingScale || 1.0,
   } as React.CSSProperties;
 
@@ -39,7 +37,6 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
           gridTemplateRows: `auto repeat(${rowCount}, minmax(60px, 1fr))` 
         }}
       >
-        {/* Category Headers */}
         {categories.map((cat) => (
           <div 
             key={cat.id} 
@@ -47,20 +44,18 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
           >
              <h3 
                 className="text-white uppercase leading-tight break-words line-clamp-2 w-full tracking-wide font-black" 
-                style={{ fontSize: `clamp(12px, calc(1.5vw * var(--cat-font-scale)), 64px)` }} 
+                style={{ fontSize: `var(--cat-font-px)` }} 
              >
                {cat.title}
              </h3>
           </div>
         ))}
 
-        {/* Question Cells */}
         {Array.from({ length: rowCount }).map((_, rowIdx) => (
            <React.Fragment key={rowIdx}>
              {categories.map((cat) => {
                const q = cat.questions[rowIdx];
                if (!q) return <div key={`empty-${cat.id}-${rowIdx}`} className="bg-transparent" />;
-               
                const isPlayable = !q.isAnswered && !q.isVoided;
                
                return (
@@ -81,18 +76,16 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
                      }
                    `}
                    style={{
-                     padding: `calc(4px * var(--tile-padding-scale))`
+                     padding: `calc(4px * var(--tile-padding-scale))`,
+                     transform: `scale(var(--tile-scale-factor))`
                    }}
                  >
                    {q.isVoided ? (
-                     <span className="font-mono text-red-600 font-black tracking-widest rotate-[-15deg]" style={{ fontSize: `clamp(10px, calc(1vw * var(--tile-font-scale)), 20px)` }}>VOID</span>
+                     <span className="font-mono text-red-600 font-black tracking-widest rotate-[-15deg]">VOID</span>
                    ) : q.isAnswered ? (
-                     <span className="font-mono font-bold text-zinc-400" style={{ fontSize: `clamp(10px, calc(1vw * var(--tile-font-scale)), 32px)` }}>---</span> 
+                     <span className="font-mono font-bold text-zinc-400">---</span> 
                    ) : (
-                     <span 
-                        className="group-hover:scale-110 transition-transform shadow-black drop-shadow-xl font-black"
-                        style={{ fontSize: `clamp(16px, calc(2.8vw * var(--tile-font-scale)), 96px)` }}
-                     >
+                     <span className="group-hover:scale-110 transition-transform shadow-black drop-shadow-xl font-black" style={{ fontSize: 'clamp(16px, 2.8vw, 96px)' }}>
                        {q.points}
                      </span>
                    )}

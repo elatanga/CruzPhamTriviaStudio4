@@ -20,42 +20,49 @@ export const DirectorAiRegenerator: React.FC<Props> = ({ gameState, onUpdateStat
   const handleRegenerate = async () => {
     if (isLoading || !prompt.trim()) return;
     
+    // 1. Prepare Metadata & Snapshot
     const genId = crypto.randomUUID();
+    const boardSnapshot = [...gameState.categories]; // Shallow copy of array for structural rollback
     const catCount = gameState.categories.length;
     const rowCount = gameState.categories[0]?.questions.length || 5;
+    
+    // Mask prompt for logging
+    const maskedSnippet = prompt.substring(0, 20) + (prompt.length > 20 ? "..." : "");
     
     setIsLoading(true);
     soundService.playClick();
     
-    logger.info('director_ai_board_regen_start', { 
+    logger.info('ai_board_regen_start', { 
       genId, 
-      prompt, 
+      promptLen: prompt.length,
+      promptSnippet: maskedSnippet, 
       difficulty, 
       dimensions: `${catCount}x${rowCount}` 
     });
 
     try {
-      // 1. Fetch new content from Gemini
+      // 2. Fetch new content from Gemini
       const aiCats = await generateTriviaGame(
         prompt,
         difficulty,
         catCount,
         rowCount,
-        100, // Dummy scale, points will be overridden by existing ones
+        100, // Points are overridden by existing ones anyway
         genId
       );
 
-      // 2. Perform zip-merge to preserve IDs, Points, and State Flags
+      // 3. Perform atomic zip-merge to preserve IDs, Points, and State Flags
+      // This is the core "Atomic Update" logic
       const nextCats: Category[] = gameState.categories.map((exCat, cIdx) => {
         const aiCat = aiCats[cIdx];
-        if (!aiCat) return exCat; // Fallback if AI returns fewer categories
+        if (!aiCat) return exCat; 
 
         return {
           ...exCat,
-          title: aiCat.title, // Update Title
+          title: aiCat.title, 
           questions: exCat.questions.map((exQ, qIdx) => {
             const aiQ = aiCat.questions[qIdx];
-            if (!aiQ) return exQ; // Fallback if AI returns fewer questions
+            if (!aiQ) return exQ; 
 
             return {
               ...exQ,       // Preserves ID, Points, isAnswered, isRevealed, isDoubleOrNothing
@@ -66,18 +73,24 @@ export const DirectorAiRegenerator: React.FC<Props> = ({ gameState, onUpdateStat
         };
       });
 
-      // 3. Atomic state update
+      // 4. Single atomic state update to prevent UI drift
       onUpdateState({
         ...gameState,
         showTitle: prompt,
         categories: nextCats
       });
 
-      logger.info('director_ai_board_regen_success', { genId, preservedIds: true });
+      logger.info('ai_board_regen_success', { genId, preservedPoints: true });
       addToast('success', 'Board content updated (IDs & Points preserved).');
-      setPrompt(''); // Clear after success
+      setPrompt(''); 
     } catch (e: any) {
-      logger.error('director_ai_board_regen_failed', { genId, error: e.message });
+      // 5. ROLLBACK / FAIL-SAFE
+      // We don't call onUpdateState, which effectively reverts to the existing gameState
+      logger.error('ai_board_regen_failed', { 
+        genId, 
+        error: e.message 
+      });
+      
       addToast('error', `Regeneration failed: ${e.message}`);
     } finally {
       setIsLoading(false);

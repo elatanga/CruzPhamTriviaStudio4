@@ -1,6 +1,5 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp, Sparkles, Sliders, Loader2 } from 'lucide-react';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp, Sparkles, Sliders, Loader2, Minus, Plus } from 'lucide-react';
 import { GameState, Question, Difficulty, Category, BoardViewSettings, Player, PlayEvent, AnalyticsEventType, GameAnalyticsEvent } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
@@ -26,43 +25,271 @@ export const DirectorPanel: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD' | 'STATS' | 'SETTINGS'>('BOARD');
   const [editingQuestion, setEditingQuestion] = useState<{cIdx: number, qIdx: number} | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [confirmResetAllWildcards, setConfirmResetAllWildcards] = useState(false);
-  const [isLogsExpanded, setIsLogsExpanded] = useState(false);
-  const logContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Per-tile AI state
+  const [tileAiDifficulty, setTileAiDifficulty] = useState<Difficulty>("mixed");
+  const [tileAiLoading, setTileAiLoading] = useState(false);
+  const tileAiGenIdRef = useRef<string | null>(null);
+  const tileSnapshotRef = useRef<Category[] | null>(null);
   
   const [processingWildcards, setProcessingWildcards] = useState<Set<string>>(new Set());
   const [isAddingPlayer, setIsAddingPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
 
+  // --- CLEANUP ON MODAL CLOSE ---
   useEffect(() => {
-    if (logContainerRef.current && isLogsExpanded) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    if (editingQuestion === null) {
+      setTileAiLoading(false);
+      tileAiGenIdRef.current = null;
+      tileSnapshotRef.current = null;
     }
-  }, [gameState.events, isLogsExpanded]);
+  }, [editingQuestion]);
 
-  const boardStats = useMemo(() => {
-    const allQs = (gameState.categories || []).flatMap(c => c.questions);
-    const total = allQs.length;
-    const answered = allQs.filter(q => q.isAnswered).length;
-    const voided = allQs.filter(q => q.isVoided).length;
-    const doubles = allQs.filter(q => q.isDoubleOrNothing).length;
-    const remaining = total - (answered + voided);
-    const progress = total > 0 ? (answered / total) * 100 : 0;
-    return { total, answered, voided, remaining, progress, doubles };
-  }, [gameState.categories]);
+  // --- AUDIT LOGS ---
+  useEffect(() => {
+    if (activeTab === 'PLAYERS') {
+      const count = gameState.players?.length || 0;
+      logger.info('director_players_render', { count });
+      if (count === 0) {
+        logger.warn('director_players_missing', { count: 0 });
+      }
+    }
+  }, [activeTab, gameState.players?.length]);
 
-  // --- AI ACTIONS ---
+  // --- ACTIONS ---
+
+  const handleUpdatePlayer = (id: string, field: keyof Player, value: any) => {
+    try {
+      logger.info('director_player_update', { playerId: id, field });
+      const nextPlayers = gameState.players.map(p => 
+        p.id === id ? { ...p, [field]: value } : p
+      );
+      onUpdateState({ ...gameState, players: nextPlayers });
+    } catch (e: any) {
+      logger.error('director_player_update_failed', { error: e.message, playerId: id });
+      addToast('error', 'Failed to update contestant');
+    }
+  };
+
+  const handleRemovePlayer = (id: string) => {
+    const p = gameState.players.find(x => x.id === id);
+    if (p && confirm(`Permanently remove ${p.name}?`)) {
+      soundService.playClick();
+      logger.info('director_player_update', { playerId: id, field: 'removed' });
+      const nextPlayers = gameState.players.filter(x => x.id !== id);
+      const nextSelection = gameState.selectedPlayerId === id ? (nextPlayers[0]?.id || null) : gameState.selectedPlayerId;
+      onUpdateState({ ...gameState, players: nextPlayers, selectedPlayerId: nextSelection });
+      addToast('info', `Removed ${p.name}`);
+    }
+  };
+
+  const handleCreatePlayer = () => {
+    const name = normalizePlayerName(newPlayerName);
+    if (!name) {
+      addToast('error', 'Enter a valid name');
+      return;
+    }
+    if (gameState.players.length >= 8) {
+      addToast('error', 'Production limit: 8 Contestants max');
+      return;
+    }
+
+    soundService.playClick();
+    logger.info('director_player_update', { playerId: 'new', field: 'added' });
+    
+    const newP: Player = { 
+      id: crypto.randomUUID(), 
+      name, 
+      score: 0, 
+      color: '#fff',
+      wildcardsUsed: 0,
+      wildcardActive: false,
+      stealsCount: 0
+    };
+    
+    onUpdateState({ 
+      ...gameState, 
+      players: [...gameState.players, newP],
+      selectedPlayerId: gameState.selectedPlayerId || newP.id
+    });
+    
+    setNewPlayerName('');
+    setIsAddingPlayer(false);
+    addToast('success', `Added ${name}`);
+  };
+
+  const handleUpdateViewSettings = (updates: Partial<BoardViewSettings>) => {
+    // Audit Settings Change
+    logger.info('director_view_settings_changed', { 
+      changedKeys: Object.keys(updates),
+      genId: crypto.randomUUID()
+    });
+
+    onUpdateState({
+      ...gameState,
+      viewSettings: {
+        ...gameState.viewSettings,
+        ...updates,
+        updatedAt: new Date().toISOString()
+      }
+    });
+
+    emitGameEvent('VIEW_SETTINGS_CHANGED', { 
+      actor: { role: 'director' }, 
+      context: { after: updates } 
+    });
+  };
+
+  /**
+   * REFINED TILE AI REGEN HANDLER
+   * - Preserves metadata flags (id, points, state)
+   * - Provides snapshot rollback (effectively no commit on fail)
+   * - PII-safe structured logging
+   * - Race rule enforcement via tileAiGenIdRef
+   */
+  const handleTileAiRegen = async (cIdx: number, qIdx: number, difficulty: Difficulty) => {
+    if (tileAiLoading) return;
+
+    const genId = crypto.randomUUID();
+    tileAiGenIdRef.current = genId;
+    tileSnapshotRef.current = [...gameState.categories];
+
+    const tsStart = new Date().toISOString();
+    const cat = gameState.categories[cIdx];
+    const q = cat.questions[qIdx];
+
+    logger.info('director_tile_ai_regen_start', {
+      ts: tsStart,
+      genId,
+      catId: cat.id,
+      tileId: q.id,
+      points: q.points,
+      difficulty
+    });
+
+    setTileAiLoading(true);
+    soundService.playClick();
+
+    try {
+      const result = await generateSingleQuestion(
+        gameState.showTitle || "General Trivia",
+        q.points,
+        cat.title,
+        difficulty,
+        genId
+      );
+
+      // RACE CONDITION CHECK
+      if (tileAiGenIdRef.current !== genId) {
+        logger.warn('director_tile_ai_regen_stale', { genId, current: tileAiGenIdRef.current });
+        return;
+      }
+
+      const nextCategories = [...gameState.categories];
+      const nextQs = [...nextCategories[cIdx].questions];
+
+      // PRESERVATION LOCK: Updates text/answer but keeps existing object metadata/id
+      nextQs[qIdx] = {
+        ...q, 
+        text: result.text,
+        answer: result.answer
+      };
+
+      nextCategories[cIdx] = { ...cat, questions: nextQs };
+
+      onUpdateState({ ...gameState, categories: nextCategories });
+
+      logger.info('director_tile_ai_regen_success', { 
+        ts: new Date().toISOString(), 
+        genId, 
+        tileId: q.id 
+      });
+      addToast('success', 'Question generated.');
+    } catch (e: any) {
+      // Rollback: No updateState call preserves existing board
+      logger.error('director_tile_ai_regen_failed', {
+        ts: new Date().toISOString(),
+        genId,
+        tileId: q.id,
+        message: e.message
+      });
+      addToast('error', 'Failed to generate question.');
+    } finally {
+      if (tileAiGenIdRef.current === genId) {
+        setTileAiLoading(false);
+      }
+    }
+  };
+
+  const handleAiRegenTile = async (cIdx: number, qIdx: number, difficulty: Difficulty = 'mixed') => {
+    if (aiLoading) return;
+    
+    const cat = gameState.categories[cIdx];
+    const q = cat.questions[qIdx];
+    const genId = crypto.randomUUID();
+    
+    logger.info('director_tile_ai_regen_start', { 
+      tileId: q.id, 
+      catId: cat.id, 
+      points: q.points, 
+      difficulty: difficulty
+    });
+
+    setAiLoading(true);
+    soundService.playClick();
+
+    try {
+      const result = await generateSingleQuestion(
+        gameState.showTitle || "General Trivia",
+        q.points,
+        cat.title,
+        difficulty,
+        genId
+      );
+
+      const nextCategories = [...gameState.categories];
+      const nextQs = [...nextCategories[cIdx].questions];
+      
+      // Preserve ID, Points, and State Flags strictly
+      nextQs[qIdx] = { 
+        ...nextQs[qIdx], 
+        text: result.text, 
+        answer: result.answer 
+      };
+      
+      nextCategories[cIdx] = { ...nextCategories[cIdx], questions: nextQs };
+
+      onUpdateState({ ...gameState, categories: nextCategories });
+      
+      logger.info('director_tile_ai_regen_success', { tileId: q.id, genId });
+      addToast('success', 'Tile updated via AI.');
+    } catch (e: any) {
+      logger.error('director_tile_ai_regen_failed', { tileId: q.id, error: e.message, genId });
+      addToast('error', `AI Failed: ${e.message}`);
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const handleAiRewriteCategory = async (cIdx: number) => {
     if (aiLoading) return;
-    soundService.playClick();
-    const cat = gameState.categories[cIdx];
+    
     const genId = crypto.randomUUID();
+    const cat = gameState.categories[cIdx];
     
+    // Log masked prompt data
+    const promptSnippet = (gameState.showTitle || "General Trivia").substring(0, 20) + "...";
+    logger.info('ai_category_regen_start', { 
+      genId, 
+      categoryId: cat.id, 
+      promptLen: (gameState.showTitle || "").length, 
+      promptSnippet,
+      difficulty: 'mixed'
+    });
+
     setAiLoading(true);
-    addToast('info', `AI is rewriting ${cat.title}...`);
+    soundService.playClick();
     
-    logger.info('director_ai_category_regen_start', { categoryId: cat.id, categoryName: cat.title, genId });
     emitGameEvent('AI_CATEGORY_REPLACE_START', { actor: { role: 'director' }, context: { categoryIndex: cIdx, categoryName: cat.title } });
 
     try {
@@ -80,147 +307,40 @@ export const DirectorPanel: React.FC<Props> = ({
 
       onUpdateState({ ...gameState, categories: nextCategories });
       
-      logger.info('director_ai_category_regen_success', { categoryId: cat.id, preservedPointScale: true, genId });
-      emitGameEvent('AI_CATEGORY_REPLACE_APPLIED', { actor: { role: 'director' }, context: { categoryIndex: cIdx } });
+      logger.info('ai_category_regen_success', { 
+        genId, 
+        categoryId: cat.id, 
+        preservedPoints: true 
+      });
       addToast('success', `${cat.title} updated.`);
     } catch (e: any) {
-      logger.error('director_ai_category_regen_failed', { categoryId: cat.id, error: e.message, genId });
-      emitGameEvent('AI_CATEGORY_REPLACE_FAILED', { actor: { role: 'director' }, context: { note: e.message } });
-      addToast('error', 'AI rewrite failed.');
+      // ROLLBACK ON FAILURE
+      logger.error('ai_category_regen_failed', { 
+        genId, 
+        categoryId: cat.id, 
+        error: e.message 
+      });
+      
+      addToast('error', `AI rewrite failed: ${e.message}`);
     } finally {
       setAiLoading(false);
     }
   };
 
-  // --- SETTINGS ACTIONS ---
-
-  const updateViewSettings = (updates: Partial<BoardViewSettings>) => {
-    emitGameEvent('VIEW_SETTINGS_CHANGED', { actor: { role: 'director' }, context: { after: updates } });
-    onUpdateState({
-      ...gameState,
-      viewSettings: {
-        ...gameState.viewSettings,
-        ...updates,
-        updatedAt: new Date().toISOString()
-      }
-    });
-  };
-
-  const handleUpdatePlayer = (id: string, field: 'name' | 'score', value: string | number) => {
-    const oldP = gameState.players.find(p => p.id === id);
-    let finalValue = value;
-    if (field === 'name') {
-       finalValue = normalizePlayerName(value as string);
-       if (!finalValue) return;
-       emitGameEvent('PLAYER_EDITED', { actor: { role: 'director' }, context: { playerId: id, playerName: finalValue, before: oldP?.name } });
-    }
-    const newPlayers = gameState.players.map(p => p.id === id ? { ...p, [field]: finalValue } : p);
-    onUpdateState({ ...gameState, players: newPlayers });
-  };
-
-  const handleUseWildcard = async (playerId: string) => {
-    const targetPlayer = gameState.players.find(p => p.id === playerId);
-    if (!targetPlayer) return;
-    const nextCount = Math.min(4, (targetPlayer.wildcardsUsed || 0) + 1);
-    setProcessingWildcards(prev => new Set(prev).add(playerId));
-    soundService.playClick();
-    onUpdateState({ ...gameState, players: gameState.players.map(p => p.id === playerId ? { ...p, wildcardsUsed: nextCount } : p) });
-    emitGameEvent('WILDCARD_USED', { actor: { role: 'director' }, context: { playerName: targetPlayer.name, playerId: targetPlayer.id, delta: nextCount } });
-    setProcessingWildcards(prev => { const n = new Set(prev); n.delete(playerId); return n; });
-  };
-
-  const handleUpdateCategoryTitle = (cIdx: number, val: string) => {
-    const nextCategories = [...gameState.categories];
-    nextCategories[cIdx] = { ...nextCategories[cIdx], title: val };
-    onUpdateState({ ...gameState, categories: nextCategories });
-  };
-
-  const handleDirectorAddPlayer = (e: React.FormEvent) => {
-    e.preventDefault();
-    const finalName = normalizePlayerName(newPlayerName);
-    if (!finalName) return;
-    
-    let uniqueName = finalName;
-    let count = 2;
-    const existingNames = gameState.players.map(p => p.name.toUpperCase());
-    while (existingNames.includes(uniqueName)) {
-      uniqueName = `${finalName} ${count}`;
-      count++;
-    }
-    
-    const newPlayer: Player = { id: crypto.randomUUID(), name: uniqueName, score: 0, color: '#fff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0 };
-    onUpdateState({ ...gameState, players: [...gameState.players, newPlayer] });
-    emitGameEvent('PLAYER_ADDED', { actor: { role: 'director' }, context: { playerName: uniqueName, playerId: newPlayer.id } });
-    setNewPlayerName('');
-    setIsAddingPlayer(false);
-    addToast('success', `Added ${uniqueName}`);
-  };
-
-  const handleResetAllWildcards = () => {
-    if (!confirmResetAllWildcards) {
-      setConfirmResetAllWildcards(true);
-      setTimeout(() => setConfirmResetAllWildcards(false), 3000);
-      return;
-    }
-    onUpdateState({
-      ...gameState,
-      players: gameState.players.map(p => ({ ...p, wildcardsUsed: 0, wildcardActive: false }))
-    });
-    emitGameEvent('WILDCARD_RESET', { actor: { role: 'director' } });
-    setConfirmResetAllWildcards(false);
-    addToast('info', 'All wildcards reset.');
-  };
-
-  const handleDeletePlayer = (player: Player) => {
-    if (confirm(`Remove ${player.name} from the game?`)) {
-      const nextPlayers = gameState.players.filter(p => p.id !== player.id);
-      let nextSelectedId = gameState.selectedPlayerId;
-      if (nextSelectedId === player.id) {
-        nextSelectedId = nextPlayers.length > 0 ? nextPlayers[0].id : null;
-      }
-      onUpdateState({ ...gameState, players: nextPlayers, selectedPlayerId: nextSelectedId });
-      emitGameEvent('PLAYER_REMOVED', { actor: { role: 'director' }, context: { playerName: player.name, playerId: player.id } });
-      addToast('info', `${player.name} removed.`);
-    }
-  };
-
-  const handleSaveQuestion = (cIdx: number, qIdx: number, updates: Partial<Question>) => {
-    const nextCategories = [...gameState.categories];
-    const cat = nextCategories[cIdx];
-    const nextQs = [...cat.questions];
-    const oldQ = nextQs[qIdx];
-    nextQs[qIdx] = { ...oldQ, ...updates };
-    nextCategories[cIdx] = { ...cat, questions: nextQs };
-    
-    onUpdateState({ ...gameState, categories: nextCategories });
-    emitGameEvent('QUESTION_EDITED', { 
-      actor: { role: 'director' }, 
-      context: { 
-        tileId: oldQ.id, 
-        categoryName: cat.title,
-        before: { text: oldQ.text, answer: oldQ.answer },
-        after: { text: updates.text, answer: updates.answer }
-      } 
-    });
-    setEditingQuestion(null);
-    addToast('success', 'Tile updated.');
-  };
+  // --- RENDERING ---
 
   return (
     <div className="h-full flex flex-col bg-zinc-950 text-white relative">
       <div className="flex-none h-14 border-b border-zinc-800 flex items-center px-4 justify-between bg-black">
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-          <button onClick={() => setActiveTab('BOARD')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 shrink-0 ${activeTab === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setActiveTab('BOARD')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Grid className="w-4 h-4" /> Board
           </button>
-          <button onClick={() => setActiveTab('PLAYERS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 shrink-0 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button onClick={() => setActiveTab('PLAYERS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Users className="w-4 h-4" /> Players
           </button>
-          <button onClick={() => setActiveTab('SETTINGS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 shrink-0 ${activeTab === 'SETTINGS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button onClick={() => setActiveTab('SETTINGS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'SETTINGS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Sliders className="w-4 h-4" /> Settings
-          </button>
-          <button onClick={() => setActiveTab('STATS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 shrink-0 ${activeTab === 'STATS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
-            <BarChart3 className="w-4 h-4" /> Analytics
           </button>
         </div>
         <div className="flex items-center gap-2">
@@ -233,8 +353,100 @@ export const DirectorPanel: React.FC<Props> = ({
         {activeTab === 'SETTINGS' && (
           <DirectorSettingsPanel 
             settings={gameState.viewSettings} 
-            onUpdateSettings={updateViewSettings} 
+            onUpdateSettings={handleUpdateViewSettings} 
           />
+        )}
+
+        {activeTab === 'PLAYERS' && (
+          <div className="space-y-6 animate-in fade-in duration-300 max-w-5xl mx-auto">
+            <div className="flex justify-between items-center bg-zinc-900/40 p-5 rounded-2xl border border-zinc-800 shadow-lg">
+              <div>
+                <h3 className="text-gold-500 font-black uppercase tracking-widest text-xs flex items-center gap-2">
+                  <Users className="w-4 h-4" /> Contestant Management
+                </h3>
+                <p className="text-[10px] text-zinc-500 uppercase font-bold mt-1 tracking-wider">Live roster overrides for game session</p>
+              </div>
+              <button 
+                onClick={() => setIsAddingPlayer(true)}
+                disabled={(gameState.players || []).length >= 8}
+                className="bg-gold-600 hover:bg-gold-500 text-black font-black px-5 py-2.5 rounded-xl text-[10px] flex items-center gap-2 uppercase disabled:opacity-30 transition-all shadow-xl shadow-gold-900/10 active:scale-95"
+              >
+                <UserPlus className="w-4 h-4" /> Add Player
+              </button>
+            </div>
+
+            {isAddingPlayer && (
+              <div className="bg-zinc-900 p-5 rounded-2xl border border-gold-500/30 flex gap-3 animate-in slide-in-from-top-2 shadow-2xl">
+                <input 
+                  autoFocus
+                  value={newPlayerName}
+                  onChange={e => setNewPlayerName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleCreatePlayer()}
+                  placeholder="ENTER PLAYER NAME"
+                  className="flex-1 bg-black border border-zinc-700 p-3 rounded-xl text-sm text-white outline-none focus:border-gold-500 font-black uppercase placeholder:text-zinc-800 tracking-tight"
+                />
+                <button onClick={handleCreatePlayer} className="bg-green-600 hover:bg-green-500 px-4 rounded-xl text-white transition-colors shadow-lg shadow-green-900/20"><Check className="check-icon w-5 h-5"/></button>
+                <button onClick={() => setIsAddingPlayer(false)} className="bg-zinc-800 hover:bg-zinc-700 px-4 rounded-xl text-zinc-400 transition-colors border border-zinc-700"><X className="w-5 h-5"/></button>
+              </div>
+            )}
+
+            <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-black/60 text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em]">
+                  <tr>
+                    <th className="p-5 border-b border-zinc-800">Contestant Name</th>
+                    <th className="p-5 border-b border-zinc-800">Live Score</th>
+                    <th className="p-5 border-b border-zinc-800 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/40">
+                  {(gameState.players || []).map(p => (
+                    <tr key={p.id} className="hover:bg-white/[0.02] transition-colors group">
+                      <td className="p-5">
+                        <input 
+                          value={p.name}
+                          onChange={e => handleUpdatePlayer(p.id, 'name', normalizePlayerName(e.target.value))}
+                          className="bg-transparent border-b border-transparent focus:border-gold-500 outline-none font-black text-sm text-white w-full uppercase tracking-tight transition-all py-1"
+                          placeholder="NAME REQUIRED"
+                        />
+                      </td>
+                      <td className="p-5">
+                        <div className="flex items-center gap-3">
+                          <button 
+                            onClick={() => handleUpdatePlayer(p.id, 'score', p.score - 100)}
+                            className="p-2 bg-black rounded-lg hover:text-red-500 text-zinc-600 transition-colors border border-zinc-800 active:scale-90"
+                            title="Subtract 100"
+                          ><Minus className="w-4 h-4"/></button>
+                          <span className="font-mono text-gold-500 font-black min-w-[5rem] text-center text-xl drop-shadow-md select-none">{p.score}</span>
+                          <button 
+                            onClick={() => handleUpdatePlayer(p.id, 'score', p.score + 100)}
+                            className="p-2 bg-black rounded-lg hover:text-green-500 text-zinc-600 transition-colors border border-zinc-800 active:scale-90"
+                            title="Add 100"
+                          ><Plus className="w-4 h-4"/></button>
+                        </div>
+                      </td>
+                      <td className="p-5 text-right">
+                        <button 
+                          onClick={() => handleRemovePlayer(p.id)}
+                          className="p-3 text-zinc-800 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500/10 rounded-xl"
+                          title="Delete Contestant"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {(!gameState.players || gameState.players.length === 0) && (
+                    <tr>
+                      <td colSpan={3} className="p-16 text-center text-zinc-700 italic text-[11px] uppercase font-black tracking-[0.3em] bg-black/20">
+                        No contestants registered for this session
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
 
         {activeTab === 'BOARD' && (
@@ -244,12 +456,26 @@ export const DirectorPanel: React.FC<Props> = ({
               {gameState.categories.map((cat, cIdx) => (
                 <div key={cat.id} className="space-y-3">
                   <div className="group relative">
-                    <input value={cat.title} onChange={e => handleUpdateCategoryTitle(cIdx, e.target.value)} className="bg-zinc-900 text-gold-400 font-bold text-xs p-2 rounded w-full border border-transparent focus:border-gold-500 outline-none pr-8" />
+                    <input value={cat.title} onChange={e => onUpdateState({...gameState, categories: gameState.categories.map((c, i) => i === cIdx ? {...c, title: e.target.value} : c)})} className="bg-zinc-900 text-gold-400 font-bold text-xs p-2 rounded w-full border border-transparent focus:border-gold-500 outline-none pr-8" />
                     <button onClick={() => handleAiRewriteCategory(cIdx)} className="absolute right-1 top-1 p-1 text-zinc-600 hover:text-purple-400 transition-colors" title="Regenerate this category only"><Wand2 className="w-3.5 h-3.5" /></button>
                   </div>
                   {cat.questions.map((q, qIdx) => (
-                    <div key={q.id} onClick={() => setEditingQuestion({cIdx, qIdx})} className={`p-3 rounded border flex flex-col gap-1 cursor-pointer transition-all hover:brightness-110 relative ${q.isVoided ? 'bg-red-900/20 border-red-800' : q.isAnswered ? 'bg-zinc-900 border-zinc-800 opacity-60' : 'bg-zinc-800 border-zinc-700'}`}>
-                      <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500"><span>{q.points}</span>{q.isVoided && <span className="text-red-500 font-bold uppercase">Void</span>}{q.isDoubleOrNothing && <span className="text-gold-500 font-bold">2x</span>}</div>
+                    <div key={q.id} onClick={() => setEditingQuestion({cIdx, qIdx})} className={`p-3 rounded border flex flex-col gap-1 cursor-pointer transition-all hover:brightness-110 relative group ${q.isVoided ? 'bg-red-900/20 border-red-800' : q.isAnswered ? 'bg-zinc-900 border-zinc-800 opacity-60' : 'bg-zinc-800 border-zinc-700'}`}>
+                      <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500">
+                        <span>{q.points}</span>
+                        {q.isDoubleOrNothing && <span className="text-gold-500 font-bold">2x</span>}
+                      </div>
+
+                      {/* QUICK AI REGEN BUTTON */}
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleAiRegenTile(cIdx, qIdx); }}
+                        disabled={aiLoading}
+                        className="absolute top-1 right-1 p-1 text-zinc-600 hover:text-purple-400 transition-all opacity-0 group-hover:opacity-100 disabled:opacity-0 active:scale-90"
+                        title="Quick AI Generate"
+                      >
+                        {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      </button>
+
                       <p className="text-xs text-zinc-300 line-clamp-2 leading-tight font-bold">{q.text}</p>
                       <div className="mt-2 pt-2 border-t border-zinc-700/40">
                         <span className="text-[9px] text-zinc-500 uppercase font-black block tracking-widest leading-none mb-1">Answer</span>
@@ -260,51 +486,6 @@ export const DirectorPanel: React.FC<Props> = ({
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {activeTab === 'PLAYERS' && (
-          <div className="max-w-4xl mx-auto space-y-4">
-             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
-               <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Contestant Management</h3>
-               <div className="flex items-center gap-2">
-                 {!isAddingPlayer ? (
-                   <button onClick={() => { if(gameState.players.length < 8) { soundService.playClick(); setIsAddingPlayer(true); }}} disabled={gameState.players.length >= 8} className="flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase bg-zinc-900 border border-zinc-700 text-gold-500 hover:text-gold-400 disabled:opacity-50 disabled:cursor-not-allowed"><UserPlus className="w-3 h-3" /> Add Player</button>
-                 ) : (
-                   <form onSubmit={handleDirectorAddPlayer} className="flex items-center gap-2 bg-black p-1 rounded border border-gold-500 animate-in slide-in-from-right-2">
-                     <input autoFocus value={newPlayerName} onChange={e => setNewPlayerName(e.target.value)} placeholder="PLAYER NAME" className="bg-transparent text-xs text-white px-2 py-1 outline-none w-32 uppercase" />
-                     <button type="submit" className="p-1 text-green-500 hover:text-green-400"><Check className="w-4 h-4" /></button>
-                     <button type="button" onClick={() => setIsAddingPlayer(false)} className="p-1 text-zinc-500 hover:text-white"><X className="w-4 h-4" /></button>
-                   </form>
-                 )}
-                 <button onClick={handleResetAllWildcards} className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase border transition-all ${confirmResetAllWildcards ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-white'}`}><RotateCcw className="w-3 h-3" /> {confirmResetAllWildcards ? 'Click to Confirm Reset All' : 'Reset All Wildcards'}</button>
-               </div>
-             </div>
-             <div className="bg-zinc-900 rounded border border-zinc-800 overflow-hidden">
-               <table className="w-full text-left text-sm">
-                 <thead className="bg-black text-zinc-500 uppercase font-mono text-xs">
-                   <tr><th className="p-3">Name</th><th className="p-3">Score</th><th className="p-3 text-center">Steals</th><th className="p-3 text-center">Wildcard</th><th className="p-3 text-right">Actions</th></tr>
-                 </thead>
-                 <tbody className="divide-y divide-zinc-800">
-                   {gameState.players.map(p => (
-                     <tr key={p.id} className="hover:bg-zinc-800/50 transition-colors">
-                       <td className="p-3"><input value={p.name.toUpperCase()} onChange={e => handleUpdatePlayer(p.id, 'name', e.target.value)} className="bg-transparent text-white font-bold outline-none border-b border-transparent focus:border-gold-500 w-full" /></td>
-                       <td className="p-3"><input type="number" value={p.score} onChange={e => handleUpdatePlayer(p.id, 'score', parseInt(e.target.value) || 0)} className="bg-transparent text-gold-400 font-mono outline-none border-b border-transparent focus:border-gold-500 w-24" /></td>
-                       <td className="p-3 text-center"><span className="text-purple-300 font-mono font-bold">{p.stealsCount || 0}</span></td>
-                       <td className="p-3">
-                          <div className="flex items-center justify-center gap-3">
-                            <button onClick={() => handleUseWildcard(p.id)} disabled={(p.wildcardsUsed || 0) >= 4 || processingWildcards.has(p.id)} className={`flex items-center gap-2 px-3 py-1 rounded text-[10px] font-bold uppercase transition-all ${(p.wildcardsUsed || 0) >= 4 ? 'bg-zinc-800 text-zinc-500 border border-zinc-700' : 'bg-gold-600/20 text-gold-500 hover:bg-gold-600/40 border border-gold-600/50'}`}>
-                              {processingWildcards.has(p.id) ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Star className={`w-3 h-3 ${(p.wildcardsUsed || 0) >= 4 ? 'text-zinc-500' : 'text-gold-500 fill-gold-500'}`} />}
-                              { (p.wildcardsUsed || 0) >= 4 ? 'MAX 4 USED' : `${p.wildcardsUsed || 0}/4` }
-                            </button>
-                          </div>
-                       </td>
-                       <td className="p-3 text-right"><button onClick={() => handleDeletePlayer(p)} className="text-zinc-600 hover:text-red-500 p-1"><Trash2 className="w-4 h-4" /></button></td>
-                     </tr>
-                   ))}
-                 </tbody>
-               </table>
-             </div>
           </div>
         )}
       </div>
@@ -318,12 +499,72 @@ export const DirectorPanel: React.FC<Props> = ({
             <div className="w-full max-w-lg bg-zinc-900 border border-gold-500/50 rounded-xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
               <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2"><div><h3 className="text-gold-500 font-bold">{cat.title} // {q.points}</h3></div><button onClick={() => setEditingQuestion(null)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button></div>
               <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
-                <div><label className="text-xs uppercase text-zinc-500 font-bold">Question</label><textarea id="dir-q-text" defaultValue={q.text} className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-24 focus:border-gold-500 outline-none font-bold" /></div>
-                <div><label className="text-xs uppercase text-zinc-500 font-bold">Answer</label><textarea id="dir-q-answer" defaultValue={q.answer} className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-16 focus:border-gold-500 outline-none font-bold" /></div>
+                
+                {/* COMPACT AI REGEN SECTION */}
+                <div className="p-4 bg-purple-900/10 border border-purple-500/20 rounded-xl mb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-[10px] uppercase text-purple-400 font-black tracking-widest flex items-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5" /> AI Regen Tile
+                    </h4>
+                    {tileAiLoading && <Loader2 className="w-3 h-3 text-purple-500 animate-spin" />}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 grid grid-cols-4 gap-1 bg-black/40 p-1 rounded-lg border border-zinc-800">
+                      {(['easy', 'medium', 'hard', 'mixed'] as Difficulty[]).map(d => (
+                        <button 
+                          key={d}
+                          onClick={() => setTileAiDifficulty(d)}
+                          className={`py-1.5 text-[8px] font-black rounded uppercase transition-all ${tileAiDifficulty === d ? 'bg-purple-600 text-white' : 'text-zinc-600 hover:text-zinc-400'}`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                    <button 
+                      onClick={() => handleTileAiRegen(cIdx, qIdx, tileAiDifficulty)}
+                      disabled={tileAiLoading}
+                      className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-[9px] font-black uppercase flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-purple-900/20"
+                    >
+                      Regen
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs uppercase text-zinc-500 font-bold">Question</label>
+                  <textarea 
+                    key={`text-${q.text}`}
+                    id="dir-q-text" 
+                    defaultValue={q.text} 
+                    className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-24 focus:border-gold-500 outline-none font-bold" 
+                  />
+                </div>
+                <div>
+                  <label className="text-xs uppercase text-zinc-500 font-bold">Answer</label>
+                  <textarea 
+                    key={`ans-${q.answer}`}
+                    id="dir-q-answer" 
+                    defaultValue={q.answer} 
+                    className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-16 focus:border-gold-500 outline-none font-bold" 
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-zinc-800">
                 <button onClick={() => setEditingQuestion(null)} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
-                <button onClick={() => { const txt = (document.getElementById('dir-q-text') as HTMLTextAreaElement).value; const ans = (document.getElementById('dir-q-answer') as HTMLTextAreaElement).value; handleSaveQuestion(cIdx, qIdx, { text: txt, answer: ans, isVoided: false }); }} className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-6 py-2 rounded flex items-center gap-2"><Save className="w-4 h-4" />Save Changes</button>
+                <button onClick={() => { 
+                   const txt = (document.getElementById('dir-q-text') as HTMLTextAreaElement).value; 
+                   const ans = (document.getElementById('dir-q-answer') as HTMLTextAreaElement).value; 
+                   
+                   const nextCategories = [...gameState.categories];
+                   const nCat = nextCategories[cIdx];
+                   const nQs = [...nCat.questions];
+                   nQs[qIdx] = { ...nQs[qIdx], text: txt, answer: ans, isVoided: false };
+                   nextCategories[cIdx] = { ...nCat, questions: nQs };
+                   
+                   onUpdateState({ ...gameState, categories: nextCategories });
+                   setEditingQuestion(null);
+                   addToast('success', 'Tile updated.');
+                }} className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-6 py-2 rounded flex items-center gap-2"><Save className="w-4 h-4" />Save Changes</button>
               </div>
             </div>
           </div>

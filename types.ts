@@ -1,5 +1,4 @@
 
-
 export interface Question {
   id: string;
   text: string;
@@ -17,31 +16,35 @@ export interface Category {
   questions: Question[];
 }
 
+export type SizeScale = 'XS' | 'S' | 'M' | 'L' | 'XL';
+
 export interface Player {
   id: string;
   name: string;
   score: number;
   color: string;
-  wildcardsUsed?: number; // Track usage count (0-4)
-  wildcardActive?: boolean; // Track current active status
-  stealsCount?: number; // Track successful steals
+  wildcardsUsed?: number; 
+  wildcardActive?: boolean; 
+  stealsCount?: number; 
 }
 
 export interface GameTimer {
-  duration: number; // Default duration setting in seconds
-  endTime: number | null; // Target timestamp
+  duration: number; 
+  endTime: number | null; 
   isRunning: boolean;
 }
 
 export interface BoardViewSettings {
-  boardFontScale: number; // Legacy/Global Scale
-  tileScale: number; // Legacy/Global Tile Scale
-  scoreboardScale: number; // Scoreboard width scale
-  // Granular Controls
-  categoryFontSizeScale: number; // 0.7 - 1.6
-  tileFontSizeScale: number; // 0.7 - 1.6
-  playerNameFontSizeScale: number; // 0.7 - 1.6
-  tilePaddingScale: number; // 0.5 - 1.5
+  // Canonical Sizing Model
+  categoryTitleScale: SizeScale;
+  playerNameScale: SizeScale;
+  tileScale: SizeScale;
+  
+  // Layout Controls
+  scoreboardScale: number; // Width multiplier (0.8 - 1.4)
+  tilePaddingScale: number; // Spacing multiplier (0.5 - 1.5)
+  
+  // Metadata
   updatedAt: string;
 }
 
@@ -139,7 +142,7 @@ export interface GameState {
   timer: GameTimer;
   viewSettings: BoardViewSettings;
   lastPlays: PlayEvent[];
-  events: GameAnalyticsEvent[]; // Real-time session events
+  events: GameAnalyticsEvent[]; 
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
@@ -157,8 +160,6 @@ export interface ToastMessage {
   type: 'success' | 'error' | 'info';
   message: string;
 }
-
-// --- ERROR HANDLING ---
 
 export type ErrorCode = 
   | 'ERR_INVALID_CREDENTIALS' 
@@ -187,8 +188,6 @@ export class AppError extends Error {
   }
 }
 
-// --- AUTHENTICATION & ADMIN TYPES ---
-
 export type UserRole = 'MASTER_ADMIN' | 'ADMIN' | 'PRODUCER';
 export type UserSource = 'MANUAL_CREATE' | 'REQUEST_APPROVAL';
 export type UserStatus = 'ACTIVE' | 'REVOKED';
@@ -214,24 +213,16 @@ export interface UserProfile {
 export interface User {
   id: string;
   username: string;
-  tokenHash: string; // SHA-256 hash
+  tokenHash: string; 
   role: UserRole;
   status: UserStatus;
-  
-  // Contact
   email?: string;
-  phone?: string; // E.164
-  
-  // Detailed Profile
+  phone?: string; 
   profile: UserProfile;
-
-  // Metadata
   createdAt: string;
   updatedAt: string;
-  expiresAt?: string | null; // ISO Date or null for permanent
+  expiresAt?: string | null; 
   createdBy?: string;
-  
-  // Tracking
   lastDelivery?: DeliveryLog;
 }
 
@@ -251,18 +242,13 @@ export interface TokenRequest {
   preferredUsername: string;
   phoneE164: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  
   createdAt: string; 
   updatedAt: string;
   approvedAt?: string;
   rejectedAt?: string;
-  userId?: string; // Linked user after approval
-
-  // Admin Notification (New Request Alert)
+  userId?: string; 
   adminNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
   adminNotifyError?: string;
-
-  // User Notification (Approval/Rejection)
   userNotifyStatus: 'PENDING' | 'SENT' | 'FAILED';
   userNotifyError?: string;
 }
@@ -304,8 +290,6 @@ export interface AuditLogEntry {
   metadata?: any;
 }
 
-// --- DATA TYPES ---
-
 export interface Show {
   id: string;
   userId: string;
@@ -333,8 +317,6 @@ export interface GameTemplate {
   lastModified?: string;
 }
 
-// --- SPECIAL MOVES ---
-
 export type SpecialMoveType = 'DOUBLE_TROUBLE' | 'TRIPLE_THREAT' | 'SABOTAGE' | 'MEGA_STEAL';
 
 export interface SMSDeployment {
@@ -357,7 +339,7 @@ export interface SMSActiveMoveContext {
 
 export interface SpecialMovesState {
   version: string;
-  deployments: Record<string, SMSDeployment>; // Key is tileId
+  deployments: Record<string, SMSDeployment>; 
   activeMove: SMSActiveMoveContext | null;
   updatedAt: number;
 }

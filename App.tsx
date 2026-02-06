@@ -58,13 +58,12 @@ const App: React.FC = () => {
       endTime: null,
       isRunning: false
     },
+    // Fix: Updated initial viewSettings to align with the BoardViewSettings interface and use SizeScale strings ('M') instead of numbers.
     viewSettings: {
-      boardFontScale: 1.0,
-      tileScale: 1.0,
+      categoryTitleScale: 'M',
+      playerNameScale: 'M',
+      tileScale: 'M',
       scoreboardScale: 1.0,
-      categoryFontSizeScale: 1.0,
-      tileFontSizeScale: 1.0,
-      playerNameFontSizeScale: 1.0,
       tilePaddingScale: 1.0,
       updatedAt: new Date().toISOString()
     },
@@ -268,17 +267,21 @@ const App: React.FC = () => {
          const savedState = localStorage.getItem('cruzpham_gamestate');
          if (savedState) {
            const parsed = JSON.parse(savedState);
-           // Hydrate scales if missing (Backwards compatibility)
+           // Fix: Updated hydration logic to align with the current BoardViewSettings interface properties and SizeScale strings.
            if (!parsed.viewSettings) {
              parsed.viewSettings = { 
-               boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, 
-               categoryFontSizeScale: 1.0, tileFontSizeScale: 1.0, playerNameFontSizeScale: 1.0, tilePaddingScale: 1.0,
+               categoryTitleScale: 'M',
+               playerNameScale: 'M',
+               tileScale: 'M',
+               scoreboardScale: 1.0,
+               tilePaddingScale: 1.0,
                updatedAt: new Date().toISOString() 
              };
            } else {
-             if (parsed.viewSettings.categoryFontSizeScale === undefined) parsed.viewSettings.categoryFontSizeScale = 1.0;
-             if (parsed.viewSettings.tileFontSizeScale === undefined) parsed.viewSettings.tileFontSizeScale = 1.0;
-             if (parsed.viewSettings.playerNameFontSizeScale === undefined) parsed.viewSettings.playerNameFontSizeScale = 1.0;
+             if (parsed.viewSettings.categoryTitleScale === undefined) parsed.viewSettings.categoryTitleScale = 'M';
+             if (parsed.viewSettings.playerNameScale === undefined) parsed.viewSettings.playerNameScale = 'M';
+             if (parsed.viewSettings.tileScale === undefined || typeof parsed.viewSettings.tileScale === 'number') parsed.viewSettings.tileScale = 'M';
+             if (parsed.viewSettings.scoreboardScale === undefined) parsed.viewSettings.scoreboardScale = 1.0;
              if (parsed.viewSettings.tilePaddingScale === undefined) parsed.viewSettings.tilePaddingScale = 1.0;
            }
            
@@ -398,9 +401,13 @@ const App: React.FC = () => {
       selectedPlayerId: initPlayers.length > 0 ? initPlayers[0].id : null,
       history: [`Started: ${template.topic}`],
       timer: { duration: 30, endTime: null, isRunning: false },
+      // Fix: Ensured fallback viewSettings matches the interface and uses SizeScale strings ('M').
       viewSettings: gameState.viewSettings || { 
-        boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, 
-        categoryFontSizeScale: 1.0, tileFontSizeScale: 1.0, playerNameFontSizeScale: 1.0, tilePaddingScale: 1.0,
+        categoryTitleScale: 'M',
+        playerNameScale: 'M',
+        tileScale: 'M',
+        scoreboardScale: 1.0,
+        tilePaddingScale: 1.0,
         updatedAt: new Date().toISOString() 
       },
       lastPlays: [],
@@ -702,7 +709,7 @@ const App: React.FC = () => {
                  <div className="flex justify-center mb-2 pt-2 relative z-20">
                    <div className="bg-zinc-900 border border-zinc-800 p-1 rounded-full flex gap-1">
                      <button onClick={() => setViewMode('BOARD')} className={`px-6 py-2 rounded-full text-xs font-bold uppercase flex items-center gap-2 ${viewMode === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}><Monitor className="w-3 h-3" /> Board</button>
-                     <button onClick={() => setViewMode('DIRECTOR')} className={`px-6 py-2 rounded-full text-xs font-bold uppercase flex items-center gap-2 ${viewMode === 'DIRECTOR' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}><Grid className="w-3 h-3" /> Director</button>
+                     <button onClick={() => setViewMode('DIRECTOR')} className={`px-6 py-2 rounded-full text-xs font-bold uppercase flex items-center gap-2 ${viewMode === 'DIRECTOR' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}><Grid className="w-3 h-3" /> Director</button>
                      {isAdmin && <button onClick={() => setViewMode('ADMIN')} className={`px-6 py-2 rounded-full text-xs font-bold uppercase flex items-center gap-2 ${viewMode === 'ADMIN' ? 'bg-purple-600 text-white' : 'text-zinc-500 hover:text-white'}`}><Shield className="w-3 h-3" /> Admin</button>}
                    </div>
                  </div>

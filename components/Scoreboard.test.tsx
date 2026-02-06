@@ -34,12 +34,11 @@ const generatePlayers = (count: number): Player[] =>
   }));
 
 const mockViewSettings: BoardViewSettings = {
-  boardFontScale: 1.0,
-  tileScale: 1.0,
+  // Fix: Corrected property names and types to match the BoardViewSettings interface.
+  categoryTitleScale: 'M',
+  tileScale: 'M',
+  playerNameScale: 'M',
   scoreboardScale: 1.0,
-  categoryFontSizeScale: 1.0,
-  tileFontSizeScale: 1.0,
-  playerNameFontSizeScale: 1.0,
   tilePaddingScale: 1.0,
   updatedAt: new Date().toISOString(),
 };

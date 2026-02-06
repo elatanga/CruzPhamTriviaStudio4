@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -7,8 +6,8 @@ import { GameState } from '../types';
 import * as geminiService from '../services/geminiService';
 
 vi.mock('../services/geminiService', () => ({
+  generateSingleQuestion: vi.fn(),
   generateCategoryQuestions: vi.fn(),
-  generateTriviaGame: vi.fn(),
 }));
 
 vi.mock('../services/logger', () => ({
@@ -19,7 +18,7 @@ vi.mock('../services/soundService', () => ({
   soundService: { playClick: vi.fn() },
 }));
 
-describe('DirectorPanel: Settings & Category Regen', () => {
+describe('Director Panel: Tile AI Regression', () => {
   const mockOnUpdateState = vi.fn();
   const mockEmitGameEvent = vi.fn();
   const mockAddToast = vi.fn();
@@ -29,8 +28,8 @@ describe('DirectorPanel: Settings & Category Regen', () => {
     isGameStarted: true,
     categories: [
       {
-        id: 'c1', title: 'Art',
-        questions: [{ id: 'q1', text: 'Old Q', answer: 'Old A', points: 100, isRevealed: false, isAnswered: false }]
+        id: 'cat-1', title: 'Art',
+        questions: [{ id: 'q-stable-id', text: 'Old Q', answer: 'Old A', points: 100, isRevealed: false, isAnswered: true }]
       }
     ],
     players: [],
@@ -39,53 +38,49 @@ describe('DirectorPanel: Settings & Category Regen', () => {
     selectedPlayerId: null,
     history: [],
     timer: { duration: 30, endTime: null, isRunning: false },
-    viewSettings: {
-      categoryTitleScale: 'M',
-      playerNameScale: 'M',
-      tileScale: 'M',
-      scoreboardScale: 1.0,
-      tilePaddingScale: 1.0,
-      updatedAt: ''
-    },
+    viewSettings: { categoryTitleScale: 'M', playerNameScale: 'M', tileScale: 'M', scoreboardScale: 1.0, tilePaddingScale: 1.0, updatedAt: '' },
     lastPlays: [],
     events: []
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Stub crypto
-    vi.stubGlobal('crypto', { randomUUID: () => 'uuid-123' });
   });
 
-  it('A) CATEGORY REGEN: preserves manual point adjustments', async () => {
-    vi.mocked(geminiService.generateCategoryQuestions).mockResolvedValue([
-      { id: 'new', text: 'New AI Q', answer: 'New AI A', points: 500, isRevealed: false, isAnswered: false }
-    ]);
+  it('LOCK: Per-tile AI regeneration preserves point values, stable IDs, and flags', async () => {
+    vi.mocked(geminiService.generateSingleQuestion).mockResolvedValue({
+      text: 'New AI Q',
+      answer: 'New AI A'
+    });
 
     render(<DirectorPanel gameState={baseGameState} onUpdateState={mockOnUpdateState} emitGameEvent={mockEmitGameEvent} addToast={mockAddToast} />);
     
-    // Trigger rewrite on first category
-    const regenBtn = screen.getByTitle(/Regenerate this category/i);
+    // Board tab is active by default
+    const regenBtn = screen.getByTitle(/Quick AI Generate/i);
     fireEvent.click(regenBtn);
 
     await waitFor(() => {
-      const updatedCat = mockOnUpdateState.mock.calls[0][0].categories[0];
-      expect(updatedCat.questions[0].points).toBe(100); // Should keep '100', not '500' from AI
-      expect(updatedCat.questions[0].text).toBe('New AI Q');
+      const nextState = mockOnUpdateState.mock.calls[0][0] as GameState;
+      const q = nextState.categories[0].questions[0];
+
+      expect(q.points).toBe(100); // MUST remain 100
+      expect(q.id).toBe('q-stable-id'); // MUST remain stable
+      expect(q.isAnswered).toBe(true); // Flag must persist
+      expect(q.text).toBe('New AI Q'); 
+      expect(q.answer).toBe('New AI A');
     });
   });
 
-  it('B) SETTINGS: emits event on scale change', () => {
+  it('LOCK: AI regeneration failures do not mutate board state', async () => {
+    vi.mocked(geminiService.generateSingleQuestion).mockRejectedValue(new Error('API Down'));
+
     render(<DirectorPanel gameState={baseGameState} onUpdateState={mockOnUpdateState} emitGameEvent={mockEmitGameEvent} addToast={mockAddToast} />);
     
-    fireEvent.click(screen.getByText('Settings'));
-    
-    // Change category title to XS
-    const xsBtn = screen.getAllByText('XS')[0];
-    fireEvent.click(xsBtn);
+    fireEvent.click(screen.getByTitle(/Quick AI Generate/i));
 
-    expect(mockEmitGameEvent).toHaveBeenCalledWith('VIEW_SETTINGS_CHANGED', expect.objectContaining({
-      context: { after: { categoryTitleScale: 'XS' } }
-    }));
+    await waitFor(() => {
+      expect(mockAddToast).toHaveBeenCalledWith('error', expect.stringContaining('AI Failed'));
+      expect(mockOnUpdateState).not.toHaveBeenCalled();
+    });
   });
 });

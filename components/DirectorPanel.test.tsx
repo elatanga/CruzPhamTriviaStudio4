@@ -37,13 +37,12 @@ const mockGameState: GameState = {
   selectedPlayerId: null,
   history: [],
   timer: { duration: 30, endTime: null, isRunning: false },
+  // Fix: Updated mock viewSettings properties and types to match the current interface.
   viewSettings: { 
-    boardFontScale: 1.0, 
-    tileScale: 1.0, 
+    categoryTitleScale: 'M',
+    playerNameScale: 'M',
+    tileScale: 'M',
     scoreboardScale: 1.0, 
-    categoryFontSizeScale: 1.0,
-    tileFontSizeScale: 1.0,
-    playerNameFontSizeScale: 1.0,
     tilePaddingScale: 1.0,
     updatedAt: '' 
   },

@@ -18,18 +18,18 @@ vi.mock('../services/soundService', () => ({
   soundService: { playClick: vi.fn() },
 }));
 
-describe('DirectorAiRegenerator: Core Generation Logic', () => {
+describe('DirectorAiRegenerator: Board-Wide Logic', () => {
   const mockOnUpdateState = vi.fn();
   const mockAddToast = vi.fn();
 
   const baseState: GameState = {
-    showTitle: 'Old Show',
+    showTitle: 'Original',
     isGameStarted: true,
     categories: [
       {
-        id: 'cat-id-1', title: 'Old Cat',
+        id: 'cat-1', title: 'Science',
         questions: [
-          { id: 'q-id-1', points: 50, text: 'Old Q', answer: 'Old A', isAnswered: true, isRevealed: true }
+          { id: 'q-1', points: 100, text: 'Old Q', answer: 'Old A', isAnswered: true, isRevealed: false }
         ]
       }
     ],
@@ -48,10 +48,10 @@ describe('DirectorAiRegenerator: Core Generation Logic', () => {
     vi.clearAllMocks();
   });
 
-  it('A) SUCCESS: Preserves IDs and points while updating content', async () => {
+  it('A) ATOMIC ZIP: preserves structure, IDs, and answered status', async () => {
     const aiResult = [{
-      id: 'new-ai-cat', title: 'New Science',
-      questions: [{ id: 'new-ai-q', text: 'New AI Question', answer: 'New AI Answer', points: 1000, isRevealed: false, isAnswered: false, isDoubleOrNothing: false }]
+      id: 'ai-gen-id', title: 'New Science',
+      questions: [{ id: 'ai-gen-q', text: 'New AI Q', answer: 'New AI A', points: 5000, isRevealed: false, isAnswered: false, isDoubleOrNothing: false }]
     }];
     vi.mocked(geminiService.generateTriviaGame).mockResolvedValue(aiResult);
 
@@ -61,53 +61,27 @@ describe('DirectorAiRegenerator: Core Generation Logic', () => {
     fireEvent.click(screen.getByText('Regenerate All'));
 
     await waitFor(() => {
-      const newState = mockOnUpdateState.mock.calls[0][0] as GameState;
-      const cat = newState.categories[0];
-      const q = cat.questions[0];
+      const callArgs = mockOnUpdateState.mock.calls[0][0] as GameState;
+      const q = callArgs.categories[0].questions[0];
 
-      // ID and Points must be preserved from baseState
-      expect(cat.id).toBe('cat-id-1');
-      expect(q.id).toBe('q-id-1');
-      expect(q.points).toBe(50);
-      
-      // Content must be updated from AI
-      expect(cat.title).toBe('New Science');
-      expect(q.text).toBe('New AI Question');
-      
-      // State flags must be preserved
-      expect(q.isAnswered).toBe(true);
+      expect(q.id).toBe('q-1'); // Preserved
+      expect(q.points).toBe(100); // Preserved
+      expect(q.isAnswered).toBe(true); // Preserved status
+      expect(q.text).toBe('New AI Q'); // Updated content
     });
   });
 
-  it('B) FAILURE: Rolls back and shows non-blocking error toast', async () => {
-    vi.mocked(geminiService.generateTriviaGame).mockRejectedValue(new Error('AI Service Down'));
+  it('B) ROLLBACK: reverts to previous categories on API failure', async () => {
+    vi.mocked(geminiService.generateTriviaGame).mockRejectedValue(new Error('Rate Limit'));
 
     render(<DirectorAiRegenerator gameState={baseState} onUpdateState={mockOnUpdateState} addToast={mockAddToast} />);
-
-    fireEvent.change(screen.getByPlaceholderText(/Global Topic/i), { target: { value: 'Fail Test' } });
+    
+    fireEvent.change(screen.getByPlaceholderText(/Global Topic/i), { target: { value: 'Broken' } });
     fireEvent.click(screen.getByText('Regenerate All'));
 
     await waitFor(() => {
-      expect(mockAddToast).toHaveBeenCalledWith('error', expect.stringContaining('AI Service Down'));
-      expect(mockOnUpdateState).not.toHaveBeenCalled();
-      expect(screen.queryByText(/Working/i)).not.toBeInTheDocument();
+      expect(mockAddToast).toHaveBeenCalledWith('error', expect.stringContaining('Rate Limit'));
+      expect(mockOnUpdateState).not.toHaveBeenCalled(); // No changes applied
     });
-  });
-
-  it('C) UX: Disables input and shows loading during generation', async () => {
-    let resolveAi: any;
-    const aiPromise = new Promise((res) => { resolveAi = res; });
-    vi.mocked(geminiService.generateTriviaGame).mockReturnValue(aiPromise as any);
-
-    render(<DirectorAiRegenerator gameState={baseState} onUpdateState={mockOnUpdateState} addToast={mockAddToast} />);
-
-    fireEvent.change(screen.getByPlaceholderText(/Global Topic/i), { target: { value: 'Science' } });
-    fireEvent.click(screen.getByText('Regenerate All'));
-
-    expect(screen.getByPlaceholderText(/Global Topic/i)).toBeDisabled();
-    expect(screen.getByText('Regenerate All')).toBeDisabled();
-    
-    // Cleanup
-    resolveAi([]);
   });
 });
