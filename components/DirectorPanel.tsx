@@ -1,6 +1,5 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp, Sparkles, Sliders, Loader2, Minus, Plus, ShieldAlert } from 'lucide-react';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp, Sparkles, Sliders, Loader2, Minus, Plus, ShieldAlert, Activity, Terminal } from 'lucide-react';
 import { GameState, Question, Difficulty, Category, BoardViewSettings, Player, PlayEvent, AnalyticsEventType, GameAnalyticsEvent } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
@@ -8,6 +7,8 @@ import { soundService } from '../services/soundService';
 import { normalizePlayerName, applyAiCategoryPreservePoints } from '../services/utils';
 import { DirectorAiRegenerator } from './DirectorAiRegenerator';
 import { DirectorSettingsPanel } from './DirectorSettingsPanel';
+import { DirectorAnalytics } from './DirectorAnalytics';
+import { DirectorLiveEventLog } from './DirectorLiveEventLog';
 
 interface Props {
   gameState: GameState;
@@ -23,22 +24,19 @@ interface Props {
 export const DirectorPanel: React.FC<Props> = ({ 
   gameState, onUpdateState, emitGameEvent, onPopout, isPoppedOut, onBringBack, addToast, onClose 
 }) => {
-  const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD' | 'STATS' | 'SETTINGS'>('BOARD');
+  const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD' | 'ANALYTICS' | 'SETTINGS'>('BOARD');
   const [editingQuestion, setEditingQuestion] = useState<{cIdx: number, qIdx: number} | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   
-  // Per-tile AI state
   const [tileAiDifficulty, setTileAiDifficulty] = useState<Difficulty>("mixed");
   const [tileAiLoading, setTileAiLoading] = useState(false);
   const tileAiGenIdRef = useRef<string | null>(null);
   const tileSnapshotRef = useRef<Category[] | null>(null);
   
-  const [processingWildcards, setProcessingWildcards] = useState<Set<string>>(new Set());
   const [isAddingPlayer, setIsAddingPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [confirmResetAll, setConfirmResetAll] = useState(false);
 
-  // --- CLEANUP ON MODAL CLOSE ---
   useEffect(() => {
     if (editingQuestion === null) {
       setTileAiLoading(false);
@@ -47,22 +45,27 @@ export const DirectorPanel: React.FC<Props> = ({
     }
   }, [editingQuestion]);
 
-  // --- AUDIT LOGS ---
-  useEffect(() => {
-    if (activeTab === 'PLAYERS') {
-      const count = gameState.players?.length || 0;
-      logger.info('director_players_render', { count });
-      if (count === 0) {
-        logger.warn('director_players_missing', { count: 0 });
-      }
-    }
-  }, [activeTab, gameState.players?.length]);
-
   // --- ACTIONS ---
 
   const handleUpdatePlayer = (id: string, field: keyof Player, value: any) => {
     try {
-      logger.info('director_player_update', { playerId: id, field });
+      const p = gameState.players.find(x => x.id === id);
+      if (!p) return;
+
+      // Telemetry Patch: Log specific updates
+      if (field === 'name') {
+        emitGameEvent('PLAYER_EDITED', {
+          actor: { role: 'director' },
+          context: { playerId: id, playerName: value, before: p.name }
+        });
+      } else if (field === 'score') {
+        const delta = value - p.score;
+        emitGameEvent('SCORE_ADJUSTED', {
+          actor: { role: 'director' },
+          context: { playerId: id, playerName: p.name, delta, points: value }
+        });
+      }
+
       const nextPlayers = gameState.players.map(p => 
         p.id === id ? { ...p, [field]: value } : p
       );
@@ -85,8 +88,6 @@ export const DirectorPanel: React.FC<Props> = ({
 
     soundService.playClick();
     const nextUsed = used + 1;
-    logger.info('director_wildcard_use', { playerId: id, count: nextUsed });
-    
     emitGameEvent('WILDCARD_USED', { 
       actor: { role: 'director' }, 
       context: { playerId: id, playerName: p.name, after: nextUsed } 
@@ -100,8 +101,6 @@ export const DirectorPanel: React.FC<Props> = ({
     if (!p) return;
 
     soundService.playClick();
-    logger.info('director_wildcard_reset', { playerId: id });
-    
     emitGameEvent('WILDCARD_RESET', { 
       actor: { role: 'director' }, 
       context: { playerId: id, playerName: p.name } 
@@ -112,12 +111,12 @@ export const DirectorPanel: React.FC<Props> = ({
 
   const handleResetAllWildcards = () => {
     soundService.playClick();
-    logger.info('director_wildcard_reset_all');
-    
     const nextPlayers = gameState.players.map(p => ({ ...p, wildcardsUsed: 0 }));
+    emitGameEvent('WILDCARD_RESET', { 
+      actor: { role: 'director' }, 
+      context: { note: 'Global Reset Applied' } 
+    });
     onUpdateState({ ...gameState, players: nextPlayers });
-    
-    emitGameEvent('WILDCARD_RESET', { actor: { role: 'director' }, context: { note: 'Reset All Players' } });
     setConfirmResetAll(false);
     addToast('info', 'All Wildcards Reset');
   };
@@ -126,7 +125,11 @@ export const DirectorPanel: React.FC<Props> = ({
     const p = gameState.players.find(x => x.id === id);
     if (p && confirm(`Permanently remove ${p.name}?`)) {
       soundService.playClick();
-      logger.info('director_player_update', { playerId: id, field: 'removed' });
+      emitGameEvent('PLAYER_REMOVED', { 
+        actor: { role: 'director' }, 
+        context: { playerId: id, playerName: p.name } 
+      });
+
       const nextPlayers = gameState.players.filter(x => x.id !== id);
       const nextSelection = gameState.selectedPlayerId === id ? (nextPlayers[0]?.id || null) : gameState.selectedPlayerId;
       onUpdateState({ ...gameState, players: nextPlayers, selectedPlayerId: nextSelection });
@@ -146,8 +149,6 @@ export const DirectorPanel: React.FC<Props> = ({
     }
 
     soundService.playClick();
-    logger.info('director_player_update', { playerId: 'new', field: 'added' });
-    
     const newP: Player = { 
       id: crypto.randomUUID(), 
       name, 
@@ -157,6 +158,11 @@ export const DirectorPanel: React.FC<Props> = ({
       wildcardActive: false,
       stealsCount: 0
     };
+
+    emitGameEvent('PLAYER_ADDED', { 
+      actor: { role: 'director' }, 
+      context: { playerId: newP.id, playerName: newP.name } 
+    });
     
     onUpdateState({ 
       ...gameState, 
@@ -169,35 +175,6 @@ export const DirectorPanel: React.FC<Props> = ({
     addToast('success', `Added ${name}`);
   };
 
-  const handleUpdateViewSettings = (updates: Partial<BoardViewSettings>) => {
-    // Audit Settings Change
-    logger.info('director_view_settings_changed', { 
-      changedKeys: Object.keys(updates),
-      genId: crypto.randomUUID()
-    });
-
-    onUpdateState({
-      ...gameState,
-      viewSettings: {
-        ...gameState.viewSettings,
-        ...updates,
-        updatedAt: new Date().toISOString()
-      }
-    });
-
-    emitGameEvent('VIEW_SETTINGS_CHANGED', { 
-      actor: { role: 'director' }, 
-      context: { after: updates } 
-    });
-  };
-
-  /**
-   * REFINED TILE AI REGEN HANDLER
-   * - Preserves metadata flags (id, points, state)
-   * - Provides snapshot rollback (effectively no commit on fail)
-   * - PII-safe structured logging
-   * - Race rule enforcement via tileAiGenIdRef
-   */
   const handleTileAiRegen = async (cIdx: number, qIdx: number, difficulty: Difficulty) => {
     if (tileAiLoading) return;
 
@@ -205,18 +182,8 @@ export const DirectorPanel: React.FC<Props> = ({
     tileAiGenIdRef.current = genId;
     tileSnapshotRef.current = [...gameState.categories];
 
-    const tsStart = new Date().toISOString();
     const cat = gameState.categories[cIdx];
     const q = cat.questions[qIdx];
-
-    logger.info('director_tile_ai_regen_start', {
-      ts: tsStart,
-      genId,
-      catId: cat.id,
-      tileId: q.id,
-      points: q.points,
-      difficulty
-    });
 
     setTileAiLoading(true);
     soundService.playClick();
@@ -230,16 +197,11 @@ export const DirectorPanel: React.FC<Props> = ({
         genId
       );
 
-      // RACE CONDITION CHECK
-      if (tileAiGenIdRef.current !== genId) {
-        logger.warn('director_tile_ai_regen_stale', { genId, current: tileAiGenIdRef.current });
-        return;
-      }
+      if (tileAiGenIdRef.current !== genId) return;
 
       const nextCategories = [...gameState.categories];
       const nextQs = [...nextCategories[cIdx].questions];
 
-      // PRESERVATION LOCK: Updates text/answer but keeps existing object metadata/id
       nextQs[qIdx] = {
         ...q, 
         text: result.text,
@@ -248,22 +210,14 @@ export const DirectorPanel: React.FC<Props> = ({
 
       nextCategories[cIdx] = { ...cat, questions: nextQs };
 
-      onUpdateState({ ...gameState, categories: nextCategories });
-
-      logger.info('director_tile_ai_regen_success', { 
-        ts: new Date().toISOString(), 
-        genId, 
-        tileId: q.id 
+      emitGameEvent('AI_TILE_REPLACE_APPLIED', { 
+        actor: { role: 'director' }, 
+        context: { tileId: q.id, categoryName: cat.title, points: q.points, difficulty } 
       });
+
+      onUpdateState({ ...gameState, categories: nextCategories });
       addToast('success', 'Question generated.');
     } catch (e: any) {
-      // Rollback: No updateState call preserves existing board
-      logger.error('director_tile_ai_regen_failed', {
-        ts: new Date().toISOString(),
-        genId,
-        tileId: q.id,
-        message: e.message
-      });
       addToast('error', 'Failed to generate question.');
     } finally {
       if (tileAiGenIdRef.current === genId) {
@@ -279,13 +233,6 @@ export const DirectorPanel: React.FC<Props> = ({
     const q = cat.questions[qIdx];
     const genId = crypto.randomUUID();
     
-    logger.info('director_tile_ai_regen_start', { 
-      tileId: q.id, 
-      catId: cat.id, 
-      points: q.points, 
-      difficulty: difficulty
-    });
-
     setAiLoading(true);
     soundService.playClick();
 
@@ -301,7 +248,6 @@ export const DirectorPanel: React.FC<Props> = ({
       const nextCategories = [...gameState.categories];
       const nextQs = [...nextCategories[cIdx].questions];
       
-      // Preserve ID, Points, and State Flags strictly
       nextQs[qIdx] = { 
         ...nextQs[qIdx], 
         text: result.text, 
@@ -310,12 +256,14 @@ export const DirectorPanel: React.FC<Props> = ({
       
       nextCategories[cIdx] = { ...nextCategories[cIdx], questions: nextQs };
 
+      emitGameEvent('AI_TILE_REPLACE_APPLIED', { 
+        actor: { role: 'director' }, 
+        context: { tileId: q.id, categoryName: cat.title, points: q.points, difficulty } 
+      });
+
       onUpdateState({ ...gameState, categories: nextCategories });
-      
-      logger.info('director_tile_ai_regen_success', { tileId: q.id, genId });
       addToast('success', 'Tile updated via AI.');
     } catch (e: any) {
-      logger.error('director_tile_ai_regen_failed', { tileId: q.id, error: e.message, genId });
       addToast('error', `AI Failed: ${e.message}`);
     } finally {
       setAiLoading(false);
@@ -328,21 +276,9 @@ export const DirectorPanel: React.FC<Props> = ({
     const genId = crypto.randomUUID();
     const cat = gameState.categories[cIdx];
     
-    // Log masked prompt data
-    const promptSnippet = (gameState.showTitle || "General Trivia").substring(0, 20) + "...";
-    logger.info('ai_category_regen_start', { 
-      genId, 
-      categoryId: cat.id, 
-      promptLen: (gameState.showTitle || "").length, 
-      promptSnippet,
-      difficulty: 'mixed'
-    });
-
     setAiLoading(true);
     soundService.playClick();
     
-    emitGameEvent('AI_CATEGORY_REPLACE_START', { actor: { role: 'director' }, context: { categoryIndex: cIdx, categoryName: cat.title } });
-
     try {
       const newQs = await generateCategoryQuestions(
         gameState.showTitle || "General Trivia", 
@@ -356,29 +292,33 @@ export const DirectorPanel: React.FC<Props> = ({
       const nextCategories = [...gameState.categories];
       nextCategories[cIdx] = applyAiCategoryPreservePoints(cat, newQs);
 
-      onUpdateState({ ...gameState, categories: nextCategories });
-      
-      logger.info('ai_category_regen_success', { 
-        genId, 
-        categoryId: cat.id, 
-        preservedPoints: true 
+      emitGameEvent('AI_CATEGORY_REPLACE_APPLIED', { 
+        actor: { role: 'director' }, 
+        context: { categoryIndex: cIdx, categoryName: cat.title, difficulty: 'mixed' } 
       });
+
+      onUpdateState({ ...gameState, categories: nextCategories });
       addToast('success', `${cat.title} updated.`);
     } catch (e: any) {
-      // ROLLBACK ON FAILURE
-      logger.error('ai_category_regen_failed', { 
-        genId, 
-        categoryId: cat.id, 
-        error: e.message 
-      });
-      
       addToast('error', `AI rewrite failed: ${e.message}`);
     } finally {
       setAiLoading(false);
     }
   };
 
-  // --- RENDERING ---
+  const handleCategoryRename = (cIdx: number, title: string) => {
+    const nextCategories = gameState.categories.map((c, i) => 
+      i === cIdx ? { ...c, title } : c
+    );
+    onUpdateState({ ...gameState, categories: nextCategories });
+  };
+
+  const emitCategoryRename = (cIdx: number, title: string) => {
+    emitGameEvent('CATEGORY_RENAMED', {
+      actor: { role: 'director' },
+      context: { categoryIndex: cIdx, categoryName: title }
+    });
+  };
 
   return (
     <div className="h-full flex flex-col bg-zinc-950 text-white relative">
@@ -390,6 +330,9 @@ export const DirectorPanel: React.FC<Props> = ({
           <button onClick={() => setActiveTab('PLAYERS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Users className="w-4 h-4" /> Players
           </button>
+          <button onClick={() => setActiveTab('ANALYTICS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'ANALYTICS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+            <BarChart3 className="w-4 h-4" /> Analytics
+          </button>
           <button onClick={() => setActiveTab('SETTINGS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'SETTINGS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Sliders className="w-4 h-4" /> Settings
           </button>
@@ -400,16 +343,40 @@ export const DirectorPanel: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-4 custom-scrollbar">
+      <div className="flex-1 overflow-hidden relative p-4">
         {activeTab === 'SETTINGS' && (
-          <DirectorSettingsPanel 
-            settings={gameState.viewSettings} 
-            onUpdateSettings={handleUpdateViewSettings} 
-          />
+          <div className="h-full overflow-y-auto custom-scrollbar">
+            <DirectorSettingsPanel 
+              settings={gameState.viewSettings} 
+              onUpdateSettings={(u) => {
+                onUpdateState({ ...gameState, viewSettings: { ...gameState.viewSettings, ...u } });
+                emitGameEvent('VIEW_SETTINGS_CHANGED', { actor: { role: 'director' }, context: { after: u } });
+              }} 
+            />
+          </div>
+        )}
+
+        {activeTab === 'ANALYTICS' && (
+          <div className="h-full flex flex-col lg:flex-row gap-6">
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              <DirectorAnalytics gameState={gameState} addToast={addToast} />
+            </div>
+            <div className="w-full lg:w-[450px] shrink-0 h-[400px] lg:h-full">
+              <div className="flex items-center gap-2 mb-3 ml-1">
+                 <Terminal className="w-4 h-4 text-gold-500" />
+                 <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Live Event Log</h4>
+              </div>
+              <DirectorLiveEventLog 
+                events={gameState.events || []} 
+                players={gameState.players} 
+                categories={gameState.categories} 
+              />
+            </div>
+          </div>
         )}
 
         {activeTab === 'PLAYERS' && (
-          <div className="space-y-6 animate-in fade-in duration-300 max-w-7xl mx-auto">
+          <div className="h-full overflow-y-auto custom-scrollbar space-y-6 animate-in fade-in duration-300 max-w-7xl mx-auto">
             <div className="flex justify-between items-center bg-zinc-900/40 p-5 rounded-2xl border border-zinc-800 shadow-lg">
               <div>
                 <h3 className="text-gold-500 font-black uppercase tracking-widest text-xs flex items-center gap-2">
@@ -524,7 +491,6 @@ export const DirectorPanel: React.FC<Props> = ({
                       </td>
                       <td className="p-5 text-right">
                         <button 
-                          /* Fix: Replace undefined 'id' with 'p.id' */
                           onClick={() => handleRemovePlayer(p.id)}
                           className="p-3 text-zinc-800 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500/10 rounded-xl"
                           title="Delete Contestant"
@@ -548,13 +514,18 @@ export const DirectorPanel: React.FC<Props> = ({
         )}
 
         {activeTab === 'BOARD' && (
-          <div className="space-y-8 animate-in fade-in duration-300">
-            <DirectorAiRegenerator gameState={gameState} onUpdateState={onUpdateState} addToast={addToast} />
-            <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${gameState.categories.length}, minmax(180px, 1fr))` }}>
+          <div className="h-full overflow-y-auto custom-scrollbar space-y-8 animate-in fade-in duration-300">
+            <DirectorAiRegenerator gameState={gameState} onUpdateState={onUpdateState} emitGameEvent={emitGameEvent} addToast={addToast} />
+            <div className="grid gap-4 pb-20" style={{ gridTemplateColumns: `repeat(${gameState.categories.length}, minmax(180px, 1fr))` }}>
               {gameState.categories.map((cat, cIdx) => (
                 <div key={cat.id} className="space-y-3">
                   <div className="group relative">
-                    <input value={cat.title} onChange={e => onUpdateState({...gameState, categories: gameState.categories.map((c, i) => i === cIdx ? {...c, title: e.target.value} : c)})} className="bg-zinc-900 text-gold-400 font-bold text-xs p-2 rounded w-full border border-transparent focus:border-gold-500 outline-none pr-8" />
+                    <input 
+                      value={cat.title} 
+                      onChange={e => handleCategoryRename(cIdx, e.target.value)} 
+                      onBlur={e => emitCategoryRename(cIdx, e.target.value)}
+                      className="bg-zinc-900 text-gold-400 font-bold text-xs p-2 rounded w-full border border-transparent focus:border-gold-500 outline-none pr-8" 
+                    />
                     <button onClick={() => handleAiRewriteCategory(cIdx)} className="absolute right-1 top-1 p-1 text-zinc-600 hover:text-purple-400 transition-colors" title="Regenerate this category only"><Wand2 className="w-3.5 h-3.5" /></button>
                   </div>
                   {cat.questions.map((q, qIdx) => (
@@ -564,7 +535,6 @@ export const DirectorPanel: React.FC<Props> = ({
                         {q.isDoubleOrNothing && <span className="text-gold-500 font-bold">2x</span>}
                       </div>
 
-                      {/* QUICK AI REGEN BUTTON */}
                       <button 
                         onClick={(e) => { e.stopPropagation(); handleAiRegenTile(cIdx, qIdx); }}
                         disabled={aiLoading}
@@ -598,7 +568,6 @@ export const DirectorPanel: React.FC<Props> = ({
               <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2"><div><h3 className="text-gold-500 font-bold">{cat.title} // {q.points}</h3></div><button onClick={() => setEditingQuestion(null)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button></div>
               <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
                 
-                {/* COMPACT AI REGEN SECTION */}
                 <div className="p-4 bg-purple-900/10 border border-purple-500/20 rounded-xl mb-4">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-[10px] uppercase text-purple-400 font-black tracking-widest flex items-center gap-2">
@@ -660,6 +629,10 @@ export const DirectorPanel: React.FC<Props> = ({
                    nextCategories[cIdx] = { ...nCat, questions: nQs };
                    
                    onUpdateState({ ...gameState, categories: nextCategories });
+                   emitGameEvent('QUESTION_EDITED', {
+                     actor: { role: 'director' },
+                     context: { tileId: q.id, categoryName: cat.title, points: q.points }
+                   });
                    setEditingQuestion(null);
                    addToast('success', 'Tile updated.');
                 }} className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-6 py-2 rounded flex items-center gap-2"><Save className="w-4 h-4" />Save Changes</button>

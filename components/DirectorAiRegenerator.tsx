@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
 import { Sparkles, Loader2, AlertCircle } from 'lucide-react';
-import { GameState, Difficulty, Category } from '../types';
+import { GameState, Difficulty, Category, AnalyticsEventType, GameAnalyticsEvent } from '../types';
 import { generateTriviaGame } from '../services/geminiService';
 import { logger } from '../services/logger';
 import { soundService } from '../services/soundService';
@@ -9,10 +8,11 @@ import { soundService } from '../services/soundService';
 interface Props {
   gameState: GameState;
   onUpdateState: (newState: GameState) => void;
+  emitGameEvent: (type: AnalyticsEventType, payload: Partial<GameAnalyticsEvent>) => void;
   addToast: (type: 'success' | 'error' | 'info', msg: string) => void;
 }
 
-export const DirectorAiRegenerator: React.FC<Props> = ({ gameState, onUpdateState, addToast }) => {
+export const DirectorAiRegenerator: React.FC<Props> = ({ gameState, onUpdateState, emitGameEvent, addToast }) => {
   const [prompt, setPrompt] = useState('');
   const [difficulty, setDifficulty] = useState<Difficulty>('mixed');
   const [isLoading, setIsLoading] = useState(false);
@@ -73,7 +73,13 @@ export const DirectorAiRegenerator: React.FC<Props> = ({ gameState, onUpdateStat
         };
       });
 
-      // 4. Single atomic state update to prevent UI drift
+      // 4. Emit Event
+      emitGameEvent('AI_BOARD_REGEN_APPLIED', {
+        actor: { role: 'director' },
+        context: { difficulty }
+      });
+
+      // 5. Single atomic state update to prevent UI drift
       onUpdateState({
         ...gameState,
         showTitle: prompt,
@@ -84,7 +90,7 @@ export const DirectorAiRegenerator: React.FC<Props> = ({ gameState, onUpdateStat
       addToast('success', 'Board content updated (IDs & Points preserved).');
       setPrompt(''); 
     } catch (e: any) {
-      // 5. ROLLBACK / FAIL-SAFE
+      // 6. ROLLBACK / FAIL-SAFE
       // We don't call onUpdateState, which effectively reverts to the existing gameState
       logger.error('ai_board_regen_failed', { 
         genId, 

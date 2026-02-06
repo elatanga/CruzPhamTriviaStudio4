@@ -21,6 +21,8 @@ vi.mock('../services/soundService', () => ({
 describe('DirectorAiRegenerator: Board-Wide Logic', () => {
   const mockOnUpdateState = vi.fn();
   const mockAddToast = vi.fn();
+  // Fix: Added mockEmitGameEvent to satisfy component Props requirement
+  const mockEmitGameEvent = vi.fn();
 
   const baseState: GameState = {
     showTitle: 'Original',
@@ -55,7 +57,8 @@ describe('DirectorAiRegenerator: Board-Wide Logic', () => {
     }];
     vi.mocked(geminiService.generateTriviaGame).mockResolvedValue(aiResult);
 
-    render(<DirectorAiRegenerator gameState={baseState} onUpdateState={mockOnUpdateState} addToast={mockAddToast} />);
+    // Fix: Pass missing emitGameEvent prop
+    render(<DirectorAiRegenerator gameState={baseState} onUpdateState={mockOnUpdateState} emitGameEvent={mockEmitGameEvent} addToast={mockAddToast} />);
 
     fireEvent.change(screen.getByPlaceholderText(/Global Topic/i), { target: { value: 'New Topic' } });
     fireEvent.click(screen.getByText('Regenerate All'));
@@ -74,7 +77,8 @@ describe('DirectorAiRegenerator: Board-Wide Logic', () => {
   it('B) ROLLBACK: reverts to previous categories on API failure', async () => {
     vi.mocked(geminiService.generateTriviaGame).mockRejectedValue(new Error('Rate Limit'));
 
-    render(<DirectorAiRegenerator gameState={baseState} onUpdateState={mockOnUpdateState} addToast={mockAddToast} />);
+    // Fix: Pass missing emitGameEvent prop
+    render(<DirectorAiRegenerator gameState={baseState} onUpdateState={mockOnUpdateState} emitGameEvent={mockEmitGameEvent} addToast={mockAddToast} />);
     
     fireEvent.change(screen.getByPlaceholderText(/Global Topic/i), { target: { value: 'Broken' } });
     fireEvent.click(screen.getByText('Regenerate All'));

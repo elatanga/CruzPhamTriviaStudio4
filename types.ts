@@ -1,4 +1,5 @@
 
+
 export interface Question {
   id: string;
   text: string;
@@ -127,6 +128,8 @@ export interface GameAnalyticsEvent {
     after?: any;
     message?: string;
     note?: string;
+    // Added difficulty to context to fix Property 'difficulty' does not exist error in logFormatter.ts
+    difficulty?: Difficulty;
   };
 }
 
