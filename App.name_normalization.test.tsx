@@ -1,4 +1,6 @@
 
+
+
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import App from './App';
@@ -86,7 +88,8 @@ describe('Player Name Normalization (Fix Verification)', () => {
     // 1. Quick Entry Add
     const input = screen.getByPlaceholderText(/ADD NAME/i);
     fireEvent.change(input, { target: { value: 'mister el' } });
-    fireEvent.click(screen.getByRole('button').find(b => b.querySelector('.lucide-plus'))!); // The plus button next to input
+    // Fix: Using getAllByRole to return array which supports .find()
+    fireEvent.click(screen.getAllByRole('button').find(b => b.querySelector('.lucide-plus'))!); // The plus button next to input
 
     // Verification
     await waitFor(() => {
@@ -130,7 +133,8 @@ describe('Player Name Normalization (Fix Verification)', () => {
 
     const input = screen.getByPlaceholderText(/ADD NAME/i);
     fireEvent.change(input, { target: { value: '   ' } });
-    fireEvent.click(screen.getByRole('button').find(b => b.querySelector('.lucide-plus'))!);
+    // Fix: Using getAllByRole to return array which supports .find()
+    fireEvent.click(screen.getAllByRole('button').find(b => b.querySelector('.lucide-plus'))!);
 
     await waitFor(() => {
         expect(screen.getByText(/ENTER PLAYER NAME/i)).toBeInTheDocument();

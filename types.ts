@@ -1,4 +1,6 @@
 
+
+
 export interface Question {
   id: string;
   text: string;
@@ -104,6 +106,8 @@ export interface GameAnalyticsEvent {
     showId?: string;
     templateId?: string;
     tileId?: string;
+    // Added playerId to resolve type errors in App.tsx and DirectorPanel.tsx
+    playerId?: string;
     categoryIndex?: number;
     rowIndex?: number;
     categoryName?: string;
@@ -321,4 +325,33 @@ export interface GameTemplate {
   categories: Category[];
   createdAt: string;
   lastModified?: string;
+}
+
+// --- SPECIAL MOVES SYSTEM TYPES ---
+
+export type SpecialMoveType = 'DOUBLE_TROUBLE' | 'TRIPLE_THREAT' | 'SABOTAGE' | 'MEGA_STEAL';
+
+export interface SMSDeployment {
+  moveType: SpecialMoveType;
+  status: 'ARMED' | 'TRIGGERED';
+  armedBy: string;
+  armedAt: number;
+  triggeredAt?: number;
+}
+
+export interface SMSActiveMoveContext {
+  tileId: string;
+  moveType: SpecialMoveType;
+  appliedAt: number;
+  restrictions: {
+    stealAllowed: boolean;
+    failAllowed: boolean;
+  };
+}
+
+export interface SpecialMovesState {
+  version: string;
+  deployments: Record<string, SMSDeployment>;
+  activeMove: SMSActiveMoveContext | null;
+  updatedAt: number;
 }
