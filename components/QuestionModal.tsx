@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Check, ShieldAlert, Monitor, ArrowLeft, Trash2, Trophy, Clock, Eye } from 'lucide-react';
 import { Question, Player, GameTimer } from '../types';
@@ -20,30 +21,23 @@ export const QuestionModal: React.FC<Props> = ({
 }) => {
   const [showStealSelect, setShowStealSelect] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
-  const footerRef = useRef<HTMLElement>(null);
   
   const isRevealed = question.isRevealed;
   const isDouble = question.isDoubleOrNothing || false;
   const activePlayer = players.find(p => p.id === selectedPlayerId);
 
-  // SCROLL LOCK + PRODUCTION LIFECYCLE LOGGING
+  // LOGGING & SCROLL LOCK
   useEffect(() => {
     const ts = new Date().toISOString();
-    logger.info("reveal_ui_open", { ts, tileId: question.id });
-    
-    if (footerRef.current) {
-      if (footerRef.current.clientHeight === 0) {
-        logger.error("reveal_actions_missing", { ts, tileId: question.id });
-      } else {
-        logger.info("reveal_actions_visible", { ts, tileId: question.id });
-      }
+    logger.info("reveal_ui_rendered", { tileId: question.id, isDoubleOrNothing: isDouble, ts });
+    if (isDouble) {
+      logger.info("double_or_nothing_displayed", { tileId: question.id, ts });
     }
 
     const originalStyle = {
       overflow: document.documentElement.style.overflow,
       bodyOverflow: document.body.style.overflow,
     };
-
     document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
 
@@ -51,9 +45,9 @@ export const QuestionModal: React.FC<Props> = ({
       document.documentElement.style.overflow = originalStyle.overflow;
       document.body.style.overflow = originalStyle.bodyOverflow;
     };
-  }, [question.id]);
+  }, [question.id, isDouble]);
 
-  // Timer Logic
+  // Timer Logic (Unchanged)
   const prevTimeLeft = useRef<number | null>(null);
   useEffect(() => {
     let interval: number;
@@ -168,164 +162,168 @@ export const QuestionModal: React.FC<Props> = ({
   return (
     <div 
       data-testid="reveal-root"
-      className="fixed inset-0 z-[9999] bg-black text-white font-sans overflow-hidden grid grid-rows-[auto_1fr_auto]"
+      className="fixed inset-0 z-[9999] bg-black text-white font-roboto overflow-hidden flex flex-col items-center justify-center p-4 md:p-8"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      {/* Background Glow */}
-      <div className={`absolute inset-0 opacity-20 transition-colors duration-500 pointer-events-none ${isRevealed ? (isDouble ? 'bg-red-900' : 'bg-gold-900') : 'bg-blue-900'}`} />
+      {/* Dynamic Ambient Background */}
+      <div className={`absolute inset-0 opacity-20 transition-colors duration-700 pointer-events-none ${isRevealed ? (isDouble ? 'bg-red-900' : 'bg-gold-900') : 'bg-blue-900'}`} />
 
-      {/* ROW 1: HEADER */}
-      <header className="flex-none h-16 md:h-20 bg-gold-600 px-4 md:px-8 flex justify-between items-center text-black z-20 shadow-2xl relative">
-        <div className="flex flex-col min-w-0 flex-1">
-          <span className="text-[10px] uppercase tracking-widest opacity-80 font-black">Category</span>
-          <h3 className="font-black uppercase tracking-widest text-sm md:text-2xl truncate pr-2">
-            {categoryTitle}
-          </h3>
+      {/* TOP FLOATING CONTEXT BAR (Category/Points) */}
+      <div className="absolute top-0 left-0 right-0 h-16 md:h-20 flex justify-between items-center px-6 md:px-12 z-20 pointer-events-none">
+        <div className="flex flex-col">
+          <span className="text-[10px] uppercase tracking-widest opacity-50 font-black">Category</span>
+          <h3 className="font-black uppercase tracking-wider text-xs md:text-xl text-gold-500">{categoryTitle}</h3>
         </div>
-        
-        <div className="flex items-center gap-4 md:gap-8 flex-none">
-          {isDouble && (
-            <div className="bg-red-700 text-white px-3 py-1 rounded-full animate-pulse border-2 border-red-900">
-               <span className="text-[10px] md:text-sm font-black tracking-widest uppercase whitespace-nowrap">DOUBLE OR NOTHING</span>
-            </div>
-          )}
-          <div className="text-right">
-            <span className="text-[10px] uppercase tracking-widest opacity-80 font-black">Points</span>
-            <div className="text-xl md:text-3xl font-black leading-none">{question.points}</div>
-          </div>
+        <div className="text-right">
+          <span className="text-[10px] uppercase tracking-widest opacity-50 font-black">Points</span>
+          <div className="text-lg md:text-3xl font-black text-white">{question.points}</div>
         </div>
-      </header>
+      </div>
 
-      {/* ROW 2: CONTENT (QUESTION + ANSWER) */}
-      <main className="flex-1 min-h-0 relative z-10 flex flex-col items-center justify-center p-6 md:p-12 overflow-hidden gap-8">
-        {/* TIMER OVERLAY (ABSOLUTE WITHIN MAIN) */}
+      {/* SINGLE LUXURY CENTERED CONTAINER */}
+      <div 
+        data-testid="luxury-container"
+        className="relative z-10 w-full max-w-7xl max-h-[85vh] bg-zinc-900/40 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-6 md:p-12 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col items-center justify-between overflow-hidden"
+      >
+        {/* TIMER OVERLAY (Floating in container corner) */}
         {timeLeft !== null && (
-           <div className={`absolute top-4 right-4 md:top-8 md:right-8 p-3 rounded-full border-4 font-mono text-2xl md:text-4xl font-black flex items-center justify-center w-16 h-16 md:w-32 md:h-32 transition-colors duration-300 bg-black/80 z-30 shadow-2xl ${timeLeft <= 5 ? 'border-red-500 text-red-500 animate-pulse' : 'border-gold-500 text-gold-500'}`}>
+           <div className={`absolute top-6 right-6 md:top-10 md:right-10 p-2 md:p-4 rounded-full border-2 md:border-4 font-mono text-xl md:text-4xl font-black flex items-center justify-center w-12 h-12 md:w-24 md:h-24 transition-colors duration-300 bg-black/60 z-30 shadow-xl ${timeLeft <= 5 ? 'border-red-500 text-red-500 animate-pulse' : 'border-gold-500 text-gold-500'}`}>
              {timeLeft}
            </div>
         )}
 
-        {/* QUESTION TEXT */}
-        <div className="w-full text-center flex-1 flex items-center justify-center min-h-0">
+        {/* 1. DOUBLE OR NOTHING LABEL */}
+        <div className="flex-none h-12 flex items-center justify-center">
+          {isDouble && (
+            <span 
+              data-testid="double-label"
+              className="text-red-500 font-black uppercase tracking-[0.3em] drop-shadow-[0_0_10px_rgba(239,68,68,0.5)] animate-in fade-in slide-in-from-top-2 duration-700"
+              style={{ fontSize: 'clamp(18px, 2vw, 32px)' }}
+            >
+              DOUBLE OR NOTHING
+            </span>
+          )}
+        </div>
+
+        {/* 2. QUESTION AREA */}
+        <div className="flex-1 flex items-center justify-center w-full px-4 overflow-hidden min-h-0">
           <h2 
             data-testid="question-text"
-            className={`leading-tight transition-all duration-500 font-roboto-bold px-4 max-h-full overflow-hidden ${isRevealed ? 'opacity-30 scale-90' : 'opacity-100 scale-100'}`}
-            style={{ fontSize: 'clamp(20px, 4.5vw, 90px)' }}
+            className={`font-roboto-bold text-center leading-[1.1] transition-all duration-700 max-h-full overflow-hidden ${isRevealed ? 'opacity-40 scale-90 blur-[1px]' : 'opacity-100 scale-100'}`}
+            style={{ fontSize: 'clamp(28px, 4.5vw, 86px)' }}
           >
             {question.text}
           </h2>
         </div>
 
-        {/* ANSWER AREA (ONLY IF REVEALED) */}
-        {isRevealed && (
-          <div className="flex-none w-full max-w-6xl animate-in zoom-in slide-in-from-bottom duration-500">
-             <div className="bg-gold-950/40 border-t-2 md:border-4 border-gold-500/50 p-6 md:p-10 rounded-3xl backdrop-blur-md shadow-[0_0_100px_rgba(255,215,0,0.2)] text-center">
-                <p 
-                  data-testid="answer-text"
-                  className="text-gold-400 font-roboto-bold leading-tight drop-shadow-2xl"
-                  style={{ fontSize: 'clamp(24px, 4vw, 80px)' }}
-                >
-                  {question.answer}
-                </p>
-             </div>
-          </div>
-        )}
-      </main>
-
-      {/* ROW 3: ACTION BAR */}
-      <footer 
-        ref={footerRef}
-        data-testid="reveal-actions"
-        className="flex-none bg-zinc-950/95 border-t border-gold-900/30 min-h-[100px] md:min-h-[140px] z-20 flex items-center justify-center relative px-4"
-      >
-        <div className="flex flex-wrap justify-center items-center gap-4 md:gap-10 w-full max-w-5xl">
-          
-          {/* RETURN ACTION */}
-          <button 
-            type="button"
-            onClick={(e) => handleAction('return', e)}
-            className="flex flex-col items-center gap-2 text-zinc-500 hover:text-white transition-all group min-w-[64px]"
-            title="Return to Board (BACKSPACE)"
-          >
-            <div className="p-3 md:p-4 bg-zinc-900 rounded-full border border-zinc-800 shadow-xl group-hover:bg-zinc-800 transition-colors">
-              <ArrowLeft className="w-5 h-5 md:w-7 md:h-7" />
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-tighter">Return</span>
-          </button>
-
-          {/* VOID ACTION */}
-          <button 
-            type="button"
-            disabled={!isRevealed}
-            onClick={(e) => handleAction('void', e)}
-            className={`flex flex-col items-center gap-2 transition-all group min-w-[64px] ${isRevealed ? 'text-zinc-500 hover:text-red-500' : 'opacity-20 cursor-not-allowed grayscale'}`}
-            title="Void Tile (ESC)"
-          >
-            <div className="p-3 md:p-4 bg-zinc-900 rounded-full border border-zinc-800 shadow-xl group-hover:border-red-900/50 transition-all">
-              <Trash2 className="w-5 h-5 md:w-7 md:h-7" />
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-tighter">Void</span>
-          </button>
-
-          {/* REVEAL ACTION (CENTER PIECE) */}
-          <div className="mx-2 md:mx-6 flex items-center justify-center min-w-[80px]">
-            {!isRevealed ? (
-              <button 
-                type="button"
-                onClick={(e) => handleAction('reveal', e)}
-                className="bg-gold-600 hover:bg-gold-500 text-black p-4 md:p-6 rounded-full shadow-[0_0_40px_rgba(255,215,0,0.4)] transition-transform active:scale-90 flex items-center gap-2 group border-4 border-black/20"
-                title="Reveal Answer (SPACE)"
+        {/* 3. ANSWER AREA */}
+        <div className="flex-none w-full flex flex-col items-center gap-8 md:gap-12 mt-4">
+          {isRevealed ? (
+            <div 
+              data-testid="answer-text"
+              className="w-full text-center py-6 md:py-10 bg-gold-950/20 border-y border-gold-500/20 animate-in zoom-in slide-in-from-bottom duration-500"
+            >
+              <p 
+                className="text-gold-400 font-roboto-bold leading-tight drop-shadow-2xl"
+                style={{ fontSize: 'clamp(24px, 3.5vw, 64px)' }}
               >
-                <Eye className="w-8 h-8 md:w-12 md:h-12" />
-                <span className="sr-only">Reveal Answer</span>
-              </button>
-            ) : (
-              <div className="w-px h-16 bg-zinc-800" />
-            )}
+                {question.answer}
+              </p>
+            </div>
+          ) : (
+            <div className="h-2 w-32 bg-zinc-800/50 rounded-full" />
+          )}
+
+          {/* 4. ACTION ICONS ROW */}
+          <div 
+            data-testid="reveal-actions"
+            className="flex flex-wrap items-center justify-center gap-4 md:gap-10 w-full"
+          >
+            {/* RETURN */}
+            <button 
+              type="button"
+              onClick={(e) => handleAction('return', e)}
+              className="flex flex-col items-center gap-2 text-zinc-500 hover:text-white transition-all group min-w-[64px]"
+              title="Return (BACKSPACE)"
+            >
+              <div className="p-3 md:p-5 bg-zinc-900/80 rounded-full border border-zinc-700 shadow-lg group-hover:bg-zinc-800 transition-colors">
+                <ArrowLeft className="w-5 h-5 md:w-8 md:h-8" />
+              </div>
+              <span className="text-[9px] font-black uppercase tracking-widest">Return</span>
+            </button>
+
+            {/* VOID */}
+            <button 
+              type="button"
+              disabled={!isRevealed}
+              onClick={(e) => handleAction('void', e)}
+              className={`flex flex-col items-center gap-2 transition-all group min-w-[64px] ${isRevealed ? 'text-zinc-500 hover:text-red-500' : 'opacity-10 cursor-not-allowed grayscale'}`}
+              title="Void (ESC)"
+            >
+              <div className="p-3 md:p-5 bg-zinc-900/80 rounded-full border border-zinc-700 shadow-lg group-hover:border-red-900/30 transition-all">
+                <Trash2 className="w-5 h-5 md:w-8 md:h-8" />
+              </div>
+              <span className="text-[9px] font-black uppercase tracking-widest">Void</span>
+            </button>
+
+            {/* MAIN REVEAL / SEPARATOR */}
+            <div className="mx-2 md:mx-6 flex items-center justify-center min-w-[80px]">
+              {!isRevealed ? (
+                <button 
+                  type="button"
+                  onClick={(e) => handleAction('reveal', e)}
+                  className="bg-gold-600 hover:bg-gold-500 text-black p-4 md:p-8 rounded-full shadow-[0_0_50px_rgba(255,215,0,0.3)] hover:scale-110 transition-all active:scale-95 flex items-center justify-center border-4 border-black/20"
+                  title="Reveal Answer (SPACE)"
+                >
+                  <Eye className="w-8 h-8 md:w-14 md:h-14" />
+                </button>
+              ) : (
+                <div className="w-px h-16 bg-zinc-800/50" />
+              )}
+            </div>
+
+            {/* STEAL */}
+            <button 
+              type="button"
+              disabled={!isRevealed}
+              onClick={(e) => handleAction('steal', e)}
+              className={`flex flex-col items-center gap-2 transition-all group min-w-[64px] ${isRevealed ? 'text-purple-500 hover:text-purple-300' : 'opacity-10 cursor-not-allowed grayscale'}`}
+              title="Steal (S)"
+            >
+              <div className="p-3 md:p-5 bg-purple-950/20 border-2 border-purple-500/50 rounded-full shadow-xl group-hover:bg-purple-900/40 transition-all">
+                <ShieldAlert className="w-5 h-5 md:w-8 md:h-8" />
+              </div>
+              <span className="text-[9px] font-black uppercase tracking-widest">Steal</span>
+            </button>
+
+            {/* AWARD */}
+            <button 
+              type="button"
+              disabled={!isRevealed || !selectedPlayerId}
+              onClick={(e) => handleAction('award', e)}
+              className={`flex flex-col items-center gap-2 transition-all group min-w-[64px] ${isRevealed && selectedPlayerId ? 'text-green-500 hover:text-green-300' : 'opacity-10 cursor-not-allowed grayscale'}`}
+              title="Award (ENTER)"
+            >
+              <div className="p-3 md:p-5 bg-green-950/20 border-2 border-green-500/50 rounded-full shadow-xl group-hover:bg-green-900/40 transition-all">
+                <Trophy className="w-5 h-5 md:w-8 md:h-8" />
+              </div>
+              <span className="text-[9px] font-black uppercase tracking-widest">Award</span>
+            </button>
           </div>
-
-          {/* STEAL ACTION */}
-          <button 
-            type="button"
-            disabled={!isRevealed}
-            onClick={(e) => handleAction('steal', e)}
-            className={`flex flex-col items-center gap-2 transition-all group min-w-[64px] ${isRevealed ? 'text-purple-500 hover:text-purple-300' : 'opacity-20 cursor-not-allowed grayscale'}`}
-            title="Initiate Steal (S)"
-          >
-            <div className="p-3 md:p-4 bg-purple-950/20 border-2 border-purple-900/50 rounded-full shadow-2xl group-hover:bg-purple-900/40 transition-all">
-              <ShieldAlert className="w-5 h-5 md:w-7 md:h-7" />
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-tighter">Steal</span>
-          </button>
-
-          {/* AWARD ACTION */}
-          <button 
-            type="button"
-            disabled={!isRevealed || !selectedPlayerId}
-            onClick={(e) => handleAction('award', e)}
-            className={`flex flex-col items-center gap-2 transition-all group min-w-[64px] ${isRevealed && selectedPlayerId ? 'text-green-500 hover:text-green-300' : 'opacity-20 cursor-not-allowed grayscale'}`}
-            title="Award Points (ENTER)"
-          >
-            <div className="p-3 md:p-4 bg-green-950/20 border-2 border-green-900/50 rounded-full shadow-2xl group-hover:bg-green-900/40 transition-all">
-              <Trophy className="w-5 h-5 md:w-7 md:h-7" />
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-tighter">Award</span>
-          </button>
-
         </div>
-      </footer>
+      </div>
 
       {/* STEAL SELECTION OVERLAY */}
       {showStealSelect && (
-        <div className="fixed inset-0 bg-black/95 z-[10000] flex flex-col items-center justify-center p-6 animate-in fade-in duration-200">
-          <h3 className="text-purple-500 font-black text-2xl md:text-5xl mb-8 md:mb-16 uppercase tracking-widest text-center drop-shadow-2xl">Who is stealing?</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8 w-full max-w-6xl px-4">
+        <div className="fixed inset-0 bg-black/98 z-[10000] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+          <h3 className="text-purple-500 font-black text-2xl md:text-6xl mb-8 md:mb-16 uppercase tracking-[0.2em] text-center drop-shadow-2xl">Who is stealing?</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8 w-full max-w-7xl px-4">
             {players.filter(p => p.id !== selectedPlayerId).map(p => (
               <button
                 key={p.id}
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onClose('steal', p.id); }}
-                className="bg-zinc-900 border-2 md:border-4 border-zinc-800 hover:border-purple-500 hover:bg-purple-900/30 p-6 md:p-12 rounded-3xl text-xl md:text-4xl font-black text-white transition-all transform active:scale-95 shadow-2xl"
+                className="bg-zinc-900 border-2 md:border-4 border-zinc-800 hover:border-purple-500 hover:bg-purple-900/30 p-8 md:p-14 rounded-[2rem] text-xl md:text-5xl font-black text-white transition-all transform active:scale-95 shadow-2xl uppercase tracking-tighter"
               >
                 {p.name}
               </button>
@@ -334,7 +332,7 @@ export const QuestionModal: React.FC<Props> = ({
           <button 
             type="button" 
             onClick={(e) => { e.stopPropagation(); setShowStealSelect(false); }} 
-            className="mt-12 md:mt-24 text-zinc-500 hover:text-white uppercase text-sm md:text-xl font-black tracking-widest transition-colors"
+            className="mt-12 md:mt-24 text-zinc-500 hover:text-white uppercase text-sm md:text-2xl font-black tracking-widest transition-colors border-b border-zinc-800 hover:border-white pb-2"
           >
             Cancel Steal
           </button>

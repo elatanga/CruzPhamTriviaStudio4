@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { GameState, Question, Difficulty, Category, BoardViewSettings, Player, PlayEvent, AnalyticsEventType, GameAnalyticsEvent } from '../types';
@@ -28,6 +27,9 @@ export const DirectorPanel: React.FC<Props> = ({
   const [isLogsExpanded, setIsLogsExpanded] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
   
+  // Card 1: Track processing states to prevent races and handle optimistic UI
+  const [processingWildcards, setProcessingWildcards] = useState<Set<string>>(new Set());
+
   // Add Player State
   const [isAddingPlayer, setIsAddingPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -100,7 +102,6 @@ export const DirectorPanel: React.FC<Props> = ({
 
       const updatedPlayers = (gameState.players || []).filter(x => x.id !== p.id);
       
-      // If we deleted the selected player, move selection to someone else or null
       let newSelectedId = gameState.selectedPlayerId;
       if (gameState.selectedPlayerId === p.id) {
         newSelectedId = updatedPlayers.length > 0 ? updatedPlayers[0].id : null;
@@ -177,44 +178,83 @@ export const DirectorPanel: React.FC<Props> = ({
     setIsAddingPlayer(false);
   };
 
-  const handleUseWildcard = (player: Player) => {
-    soundService.playClick();
-    const currentUsed = player.wildcardsUsed || 0;
+  // CARD 1: Robust Wildcard Implementation
+  const handleUseWildcard = async (playerId: string) => {
+    const ts = new Date().toISOString();
     
-    if (currentUsed >= 4) {
-      addToast('error', 'Max wildcards (4) reached.');
+    const targetPlayer = gameState.players.find(p => p.id === playerId);
+    if (!targetPlayer) {
+      logger.warn("wildcard_player_missing", { playerId, ts });
       return;
     }
 
-    const nextUsed = currentUsed + 1;
-    const newPlayers = gameState.players.map(p => 
-      p.id === player.id ? { ...p, wildcardsUsed: nextUsed } : p
-    );
-    
-    emitGameEvent('WILDCARD_USED', {
-      actor: { role: 'director' },
-      context: { playerName: player.name, playerId: player.id, delta: nextUsed }
-    });
+    const prevCount = targetPlayer.wildcardsUsed || 0;
+    const nextCount = Math.min(4, prevCount + 1);
 
+    if (nextCount === prevCount) {
+      if (nextCount === 4) addToast('info', `${targetPlayer.name} has reached max wildcards.`);
+      return;
+    }
+
+    logger.info("wildcard_click", { playerId, prevCount, nextCount, ts });
+
+    setProcessingWildcards(prev => new Set(prev).add(playerId));
+    soundService.playClick();
+
+    // OPTIMISTIC UPDATE: Instant UI Sync
+    const newPlayers = gameState.players.map(p => 
+      p.id === playerId ? { ...p, wildcardsUsed: nextCount } : p
+    );
     onUpdateState({ ...gameState, players: newPlayers });
-    addToast('success', `${player.name}: Wildcard Used (${nextUsed}/4)`);
+    logger.info("wildcard_optimistic_applied", { playerId, nextCount, ts });
+
+    try {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      emitGameEvent('WILDCARD_USED', {
+        actor: { role: 'director' },
+        context: { playerName: targetPlayer.name, playerId: targetPlayer.id, delta: nextCount }
+      });
+      
+      logger.info("wildcard_persist_ok", { playerId, nextCount, ts });
+      addToast('success', `${targetPlayer.name}: Wildcard Used (${nextCount}/4)`);
+    } catch (err: any) {
+      logger.error("wildcard_persist_failed", { playerId, prevCount, attempted: nextCount, error: err.message, ts });
+      
+      // ROLLBACK: Revert state if sync fails
+      const rollbackPlayers = gameState.players.map(p => 
+        p.id === playerId ? { ...p, wildcardsUsed: prevCount } : p
+      );
+      onUpdateState({ ...gameState, players: rollbackPlayers });
+      addToast('error', `Sync Failed for ${targetPlayer.name}`);
+    } finally {
+      setProcessingWildcards(prev => {
+        const next = new Set(prev);
+        next.delete(playerId);
+        return next;
+      });
+    }
   };
 
-  const handleResetWildcard = (player: Player) => {
-    if (!player.wildcardsUsed || player.wildcardsUsed <= 0) return;
-    
+  const handleResetWildcard = async (playerId: string) => {
+    const ts = new Date().toISOString();
+    const targetPlayer = gameState.players.find(p => p.id === playerId);
+    if (!targetPlayer || (targetPlayer.wildcardsUsed || 0) === 0) return;
+
     soundService.playClick();
+    const prevCount = targetPlayer.wildcardsUsed || 0;
     const newPlayers = gameState.players.map(p => 
-      p.id === player.id ? { ...p, wildcardsUsed: 0 } : p
+      p.id === playerId ? { ...p, wildcardsUsed: 0 } : p
     );
+    
+    onUpdateState({ ...gameState, players: newPlayers });
     
     emitGameEvent('WILDCARD_RESET', {
        actor: { role: 'director' },
-       context: { playerName: player.name, playerId: player.id }
+       context: { playerName: targetPlayer.name, playerId: targetPlayer.id }
     });
-
-    onUpdateState({ ...gameState, players: newPlayers });
-    addToast('info', `Wildcards reset for ${player.name}`);
+    addToast('info', `Wildcards reset for ${targetPlayer.name}`);
+    logger.info("wildcard_reset_manual", { playerId, prevCount, ts });
   };
 
   const handleResetAllWildcards = () => {
@@ -236,7 +276,10 @@ export const DirectorPanel: React.FC<Props> = ({
 
     addToast('success', 'All wildcards reset');
     setConfirmResetAllWildcards(false);
+    logger.info("wildcard_reset_all_manual", { ts: new Date().toISOString() });
   };
+
+  // --- UTILS FOR BOARD EDITOR ---
 
   const handleUpdateCategoryTitle = (cIdx: number, title: string) => {
     const oldTitle = gameState.categories[cIdx].title;
@@ -315,103 +358,8 @@ export const DirectorPanel: React.FC<Props> = ({
     setEditingQuestion(null);
   };
 
-  const handleAiReplace = async (cIdx: number, qIdx: number, difficulty: Difficulty) => {
-    soundService.playClick();
-    setAiLoading(true);
-    const cat = gameState.categories[cIdx];
-    const q = cat.questions[qIdx];
-    emitGameEvent('AI_TILE_REPLACE_START', { actor: { role: 'director' }, context: { tileId: q.id, points: q.points } });
-    try {
-      const result = await generateSingleQuestion(gameState.showTitle, q.points, cat.title, difficulty);
-      emitGameEvent('AI_TILE_REPLACE_APPLIED', { actor: { role: 'director' }, context: { tileId: q.id, points: q.points } });
-      handleSaveQuestion(cIdx, qIdx, {
-        text: result.text,
-        answer: result.answer,
-        isVoided: false,
-        isAnswered: false,
-        isRevealed: false
-      });
-      addToast('success', 'AI Generation Complete');
-    } catch (e: any) {
-      emitGameEvent('AI_TILE_REPLACE_FAILED', { actor: { role: 'director' }, context: { tileId: q.id, message: e.message } });
-      addToast('error', 'AI Failed.');
-    } finally {
-      setAiLoading(false);
-    }
-  };
+  // --- RENDERING ---
 
-  const handleAiRewriteCategory = async (cIdx: number) => {
-    soundService.playClick();
-    if (!confirm('Rewrite category?')) return;
-    setAiLoading(true);
-    const cat = gameState.categories[cIdx];
-    emitGameEvent('AI_CATEGORY_REPLACE_START', { actor: { role: 'director' }, context: { categoryIndex: cIdx, categoryName: cat.title } });
-    try {
-      const newQs = await generateCategoryQuestions(gameState.showTitle, cat.title, cat.questions.length, 'mixed');
-      const newCats = [...gameState.categories];
-      newCats[cIdx].questions = newQs.map((nq, i) => ({
-        ...nq,
-        points: (i + 1) * 100,
-        id: cat.questions[i]?.id || nq.id
-      }));
-      emitGameEvent('AI_CATEGORY_REPLACE_APPLIED', { actor: { role: 'director' }, context: { categoryIndex: cIdx, categoryName: cat.title } });
-      onUpdateState({ ...gameState, categories: newCats });
-      addToast('success', 'Category Rewritten');
-    } catch (e: any) {
-      emitGameEvent('AI_CATEGORY_REPLACE_FAILED', { actor: { role: 'director' }, context: { categoryIndex: cIdx, message: e.message } });
-      addToast('error', 'AI Failed.');
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  const handleDownloadLogs = () => {
-    try {
-      const now = new Date();
-      const pad = (n: number) => n.toString().padStart(2, '0');
-      const datestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
-      
-      const header = `CRUZPHAM TRIVIA STUDIOS - FULL SESSION LOG\nSHOW: ${gameState.showTitle}\nEXPORTED: ${now.toISOString()}\n--------------------------------------------------\n\n`;
-      
-      const script = (gameState.events || []).map(ev => {
-        const time = new Date(ev.ts).toLocaleTimeString([], { hour12: false });
-        const details = Object.entries(ev.context)
-           .filter(([_, v]) => v !== undefined)
-           .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
-           .join(', ');
-        return `[${time}] ${ev.type} — ${details}`;
-      }).join('\n');
-
-      const blob = new Blob([header + script], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `cruzpham-trivia-logs-${datestamp}.txt`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      addToast('success', 'Full log history exported.');
-    } catch (e: any) {
-      logger.error('log_download_failed', { message: e.message });
-      addToast('error', 'Failed to generate log download.');
-    }
-  };
-
-  const handleClearPlayLogs = () => {
-    if (confirm('Clear the "Last 4 Plays" feed? This does not affect game scores.')) {
-      onUpdateState({ ...gameState, lastPlays: [] });
-      addToast('info', 'Play logs cleared.');
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    addToast('success', 'Copied to clipboard');
-  };
-
-  // --- RENDER HELPERS ---
   const getEventColor = (type: AnalyticsEventType) => {
     if (type.includes('FAILED') || type === 'TILE_VOIDED' || type === 'PLAYER_REMOVED') return 'text-red-400';
     if (type.includes('AWARDED') || type.includes('STARTED') || type === 'PLAYER_ADDED') return 'text-green-400';
@@ -434,7 +382,6 @@ export const DirectorPanel: React.FC<Props> = ({
     );
   }
 
-  // Analytics event visibility logic: Show last 4 if collapsed, all if expanded (newest at top)
   const events = gameState.events || [];
   const displayedEvents = isLogsExpanded 
     ? [...events].reverse() 
@@ -471,17 +418,11 @@ export const DirectorPanel: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* CONTENT */}
       <div className="flex-1 overflow-auto p-4 custom-scrollbar">
-        
-        {/* === ANALYTICS & STATS DASHBOARD === */}
+        {/* === STATS / ANALYTICS TAB === */}
         {activeTab === 'STATS' && (
-          <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300 pb-20">
-             
-             {/* TOP SECTION: SUMMARY & LAST PLAYS */}
+          <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300">
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* METRICS COLUMN */}
                 <div className="lg:col-span-1 space-y-4">
                   <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm flex items-center gap-2 border-b border-zinc-800 pb-2">
                     <Info className="w-4 h-4" /> Summary Metrics
@@ -492,132 +433,39 @@ export const DirectorPanel: React.FC<Props> = ({
                       <span className="text-2xl font-black text-green-500">{boardStats.answered}</span>
                     </div>
                     <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-lg flex flex-col justify-center h-24">
-                      <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Voided</p>
-                      <span className="text-2xl font-black text-red-500">{boardStats.voided}</span>
-                    </div>
-                  </div>
-                  <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-lg flex flex-col justify-between h-24">
-                    <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Session Progress</p>
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 bg-zinc-950 h-2 rounded-full overflow-hidden">
-                        <div className="bg-gold-500 h-full shadow-[0_0_8px_rgba(255,215,0,0.5)] transition-all duration-700" style={{ width: `${boardStats.progress}%` }} />
-                      </div>
-                      <span className="text-xs font-mono font-bold text-gold-500">{Math.round(boardStats.progress)}%</span>
+                      <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Remaining</p>
+                      <span className="text-2xl font-black text-zinc-300">{boardStats.remaining}</span>
                     </div>
                   </div>
                 </div>
-
-                {/* LAST 4 PLAYS PANEL */}
                 <div className="lg:col-span-2 space-y-4">
-                  <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-                    <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm flex items-center gap-2">
-                      <History className="w-4 h-4" /> Last 4 Plays
-                    </h3>
-                    <button onClick={handleClearPlayLogs} className="text-[9px] uppercase font-bold text-zinc-600 hover:text-zinc-400 flex items-center gap-1">
-                      <Trash className="w-3 h-3" /> Clear Feed
-                    </button>
-                  </div>
-                  
-                  <div className="bg-black border border-zinc-800 rounded-lg overflow-hidden divide-y divide-zinc-900 min-h-[160px]">
-                    {(!gameState.lastPlays || gameState.lastPlays.length === 0) ? (
-                      <div className="h-40 flex items-center justify-center text-zinc-700 italic text-xs">
-                        No play data captured in this session yet.
-                      </div>
+                  <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm flex items-center gap-2 border-b border-zinc-800 pb-2">
+                    <History className="w-4 h-4" /> Real-time event log
+                  </h3>
+                  <div ref={logContainerRef} className={`bg-black border border-zinc-800/50 rounded-lg p-3 transition-all ${isLogsExpanded ? 'max-h-[50vh] overflow-y-auto' : 'max-h-[160px] overflow-hidden'}`}>
+                    {events.length === 0 ? (
+                      <div className="text-zinc-700 italic text-xs py-8 text-center">Waiting for session activity...</div>
                     ) : (
-                      gameState.lastPlays.map((play) => {
-                        const time = new Date(play.atMs).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                        const summary = `${play.action} | ${play.categoryName} / ${play.basePoints}`;
-                        
-                        return (
-                          <div key={play.id} className="p-3 flex items-center justify-between group hover:bg-zinc-900/30 transition-colors animate-in slide-in-from-right-2">
-                            <div className="flex items-center gap-4 min-w-0">
-                              <span className="font-mono text-[10px] text-zinc-600 shrink-0">{time}</span>
-                              <div className="flex flex-col min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-[10px] font-black uppercase px-1.5 rounded ${
-                                    play.action === 'AWARD' ? 'bg-green-900/50 text-green-400' :
-                                    play.action === 'STEAL' ? 'bg-orange-900/50 text-orange-400' :
-                                    play.action === 'VOID' ? 'bg-red-900/50 text-red-400' : 'bg-zinc-800 text-zinc-400'
-                                  }`}>
-                                    {play.action}
-                                  </span>
-                                  <span className="text-[11px] font-bold text-zinc-300 truncate">
-                                    {play.action === 'AWARD' && <><span className="text-white">{play.awardedPlayerName?.toUpperCase()}</span> <span className="text-green-500">+{play.effectivePoints}</span></>}
-                                    {play.action === 'STEAL' && <><span className="text-white">{play.stealerPlayerName?.toUpperCase()}</span> <span className="text-orange-500">+{play.effectivePoints}</span> <span className="text-zinc-600 text-[10px]">(from {play.attemptedPlayerName})</span></>}
-                                    {play.action === 'VOID' && <span className="text-red-500 italic">tile disabled</span>}
-                                    {play.action === 'RETURN' && <span className="text-zinc-500">returned to board</span>}
-                                  </span>
-                                </div>
-                                <span className="text-[9px] text-zinc-500 uppercase tracking-widest mt-0.5">
-                                  {play.categoryName} / {play.basePoints} PTS {play.notes ? `(${play.notes})` : ''}
-                                </span>
-                              </div>
-                            </div>
-                            <button 
-                              onClick={() => copyToClipboard(summary)} 
-                              className="p-1.5 rounded text-zinc-700 hover:text-gold-500 opacity-0 group-hover:opacity-100 transition-all"
-                              title="Copy summary"
-                            >
-                              <Copy className="w-3 h-3" />
-                            </button>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-             </div>
-
-             {/* FULL TELEMETRY SECTION */}
-             <div className="space-y-4 pt-4">
-                <div className="flex justify-between items-center px-1">
-                   <h4 className="text-[10px] uppercase font-black text-zinc-500 tracking-widest flex items-center gap-2">
-                      <Clock className="w-3 h-3" /> System Event Telemetry
-                   </h4>
-                   <div className="flex gap-4">
-                      <button onClick={handleDownloadLogs} className="text-[10px] uppercase font-bold text-zinc-500 hover:text-gold-500 flex items-center gap-1 transition-colors">
-                        <Download className="w-3 h-3" /> Export Script
-                      </button>
-                      <button 
-                        onClick={() => { soundService.playClick(); setIsLogsExpanded(!isLogsExpanded); }}
-                        className="text-[10px] uppercase font-bold text-gold-600 hover:text-gold-400 flex items-center gap-1 transition-colors"
-                      >
-                        {isLogsExpanded ? <><ChevronUp className="w-3 h-3" /> Collapse feed</> : <><ChevronDown className="w-3 h-3" /> Expand history</>}
-                      </button>
-                   </div>
-                </div>
-                
-                <div 
-                  ref={logContainerRef}
-                  className={`bg-black border border-zinc-800/50 rounded-lg transition-all duration-300 shadow-inner ${isLogsExpanded ? 'max-h-[40vh] p-3 overflow-y-auto' : 'max-h-[120px] p-2 overflow-hidden'}`}
-                >
-                   {events.length === 0 ? (
-                      <div className="h-full flex items-center justify-center text-zinc-700 italic text-xs py-8">
-                         Initializing telemetry... Waiting for session activity.
-                      </div>
-                   ) : (
                       <div className="space-y-1.5">
                         {displayedEvents.map(ev => (
-                           <div key={ev.id} className="font-mono text-[10px] border-b border-zinc-900/40 pb-1.5 flex gap-3 animate-in slide-in-from-top-1 group">
-                              <span className="text-zinc-600 shrink-0 font-bold select-none">{new Date(ev.ts).toLocaleTimeString([], { hour12: false })}</span>
+                           <div key={ev.id} className="font-mono text-[10px] border-b border-zinc-900/40 pb-1.5 flex gap-3 animate-in slide-in-from-top-1">
+                              <span className="text-zinc-600 shrink-0 font-bold">{new Date(ev.ts).toLocaleTimeString([], { hour12: false })}</span>
                               <span className={`font-black shrink-0 uppercase tracking-tighter w-24 truncate ${getEventColor(ev.type)}`}>{ev.type.replace(/_/g, ' ')}</span>
-                              <span className="text-zinc-400 group-hover:text-zinc-300 transition-colors truncate">
-                                {ev.context.playerName ? <span className="text-gold-500 font-bold">{ev.context.playerName.toUpperCase()} </span> : ''}
-                                {ev.context.delta ? <span className={ev.context.delta > 0 ? 'text-green-500' : 'text-red-500'}>({ev.context.delta > 0 ? '+' : ''}{ev.context.delta}) </span> : ''}
-                                {ev.context.categoryName ? <span className="opacity-60">| {ev.context.categoryName} </span> : ''}
-                                {ev.context.note || ev.context.message || ''}
-                              </span>
+                              <span className="text-zinc-400 truncate">{ev.context.playerName ? <span className="text-gold-500 font-bold">{ev.context.playerName.toUpperCase()} </span> : ''}{ev.context.delta ? <span className={ev.context.delta > 0 ? 'text-green-500' : 'text-red-500'}>({ev.context.delta > 0 ? '+' : ''}{ev.context.delta}) </span> : ''}{ev.context.note || ev.context.message || ''}</span>
                            </div>
                         ))}
                       </div>
-                   )}
+                    )}
+                  </div>
+                  <div className="flex justify-end gap-3 mt-2">
+                    <button onClick={() => { soundService.playClick(); setIsLogsExpanded(!isLogsExpanded); }} className="text-[10px] uppercase font-bold text-zinc-500 hover:text-white transition-colors">{isLogsExpanded ? 'Collapse log' : 'Expand history'}</button>
+                  </div>
                 </div>
              </div>
-
           </div>
         )}
 
-        {/* === BOARD EDITOR === */}
+        {/* === BOARD EDITOR TAB === */}
         {activeTab === 'BOARD' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -649,22 +497,6 @@ export const DirectorPanel: React.FC<Props> = ({
                           ))}
                        </div>
                     </div>
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Grid className="w-3 h-3" /> Tile Size</label>
-                       <div className="flex bg-black p-1 rounded gap-1 border border-zinc-800">
-                          {[0.85, 1.0, 1.15].map((scale, i) => (
-                             <button key={scale} type="button" onClick={() => updateViewSettings({ tileScale: scale })} className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.tileScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}>{['Compact', 'Default', 'Large'][i]}</button>
-                          ))}
-                       </div>
-                    </div>
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Users className="w-3 h-3" /> Scoreboard</label>
-                       <div className="flex bg-black p-1 rounded gap-1 border border-zinc-800">
-                          {[0.9, 1.0, 1.2, 1.4].map((scale, i) => (
-                             <button key={scale} type="button" onClick={() => updateViewSettings({ scoreboardScale: scale })} className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.scoreboardScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}>{['XS', 'Default', 'Large', 'XL'][i]}</button>
-                          ))}
-                       </div>
-                    </div>
                  </div>
               </div>
             </div>
@@ -679,27 +511,17 @@ export const DirectorPanel: React.FC<Props> = ({
                 <div key={cat.id} className="space-y-2">
                   <div className="flex items-center gap-2 mb-2">
                     <input value={cat.title} onChange={e => handleUpdateCategoryTitle(cIdx, e.target.value)} className="bg-zinc-900 text-gold-400 font-bold text-xs p-2 rounded w-full border border-transparent focus:border-gold-500 outline-none" />
-                    <button type="button" onClick={() => handleAiRewriteCategory(cIdx)} className="text-zinc-600 hover:text-purple-400" title="AI Rewrite Category"><Wand2 className="w-3 h-3" /></button>
                   </div>
                   {cat.questions.map((q, qIdx) => (
                     <div key={q.id} onClick={() => { 
-                        // CARD 1: Director Oversight Logging
-                        logger.info("director_view_tile", {
-                          ts: new Date().toISOString(),
-                          tileId: q.id,
-                          hasQuestion: !!q.text,
-                          hasAnswer: !!q.answer
-                        });
-                        if (!q.answer) {
-                          logger.warn("director_answer_missing", { ts: new Date().toISOString(), tileId: q.id });
-                        }
+                        logger.info("director_view_tile", { ts: new Date().toISOString(), tileId: q.id, hasQuestion: !!q.text, hasAnswer: !!q.answer });
+                        if (!q.answer) logger.warn("director_answer_missing", { ts: new Date().toISOString(), tileId: q.id });
                         soundService.playClick(); 
                         setEditingQuestion({cIdx, qIdx}); 
                       }} 
                       className={`p-3 rounded border flex flex-col gap-1 cursor-pointer transition-all hover:brightness-110 relative ${q.isVoided ? 'bg-red-900/20 border-red-800' : q.isAnswered ? 'bg-zinc-900 border-zinc-800 opacity-60' : 'bg-zinc-800 border-zinc-700'}`}>
                       <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500"><span>{q.points}</span>{q.isVoided && <span className="text-red-500 font-bold uppercase">Void</span>}{q.isDoubleOrNothing && <span className="text-gold-500 font-bold">2x</span>}</div>
                       <p className="text-xs text-zinc-300 line-clamp-2 leading-tight font-bold">{q.text}</p>
-                      {/* CARD 1: Director-Only Answer Insight */}
                       <div className="mt-2 pt-2 border-t border-zinc-700/40">
                         <span className="text-[9px] text-zinc-500 uppercase font-black block tracking-widest leading-none mb-1">Answer</span>
                         <p className={`text-[10px] leading-tight font-roboto-bold ${q.answer ? 'text-gold-400' : 'text-zinc-600 italic'}`}>
@@ -714,9 +536,9 @@ export const DirectorPanel: React.FC<Props> = ({
           </div>
         )}
 
-        {/* === PLAYERS EDITOR === */}
+        {/* === PLAYERS TAB === */}
         {activeTab === 'PLAYERS' && (
-          <div className="max-w-3xl mx-auto space-y-4">
+          <div className="max-w-4xl mx-auto space-y-4">
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Contestant Management</h3>
                <div className="flex items-center gap-2">
@@ -729,7 +551,7 @@ export const DirectorPanel: React.FC<Props> = ({
                      <button type="button" onClick={() => setIsAddingPlayer(false)} className="p-1 text-zinc-500 hover:text-white"><X className="w-4 h-4" /></button>
                    </form>
                  )}
-                 <button onClick={handleResetAllWildcards} className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase border transition-all ${confirmResetAllWildcards ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-white'}`}><RotateCcw className="w-3 h-3" /> {confirmResetAllWildcards ? 'Confirm Reset All' : 'Reset Wildcards'}</button>
+                 <button onClick={handleResetAllWildcards} className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase border transition-all ${confirmResetAllWildcards ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-white'}`}><RotateCcw className="w-3 h-3" /> {confirmResetAllWildcards ? 'Click to Confirm Reset All' : 'Reset All Wildcards'}</button>
                </div>
              </div>
              <div className="bg-zinc-900 rounded border border-zinc-800 overflow-hidden">
@@ -739,13 +561,32 @@ export const DirectorPanel: React.FC<Props> = ({
                  </thead>
                  <tbody className="divide-y divide-zinc-800">
                    {gameState.players.map(p => (
-                     <tr key={p.id} className="hover:bg-zinc-800/50">
+                     <tr key={p.id} className="hover:bg-zinc-800/50 transition-colors">
                        <td className="p-3"><input value={p.name.toUpperCase()} onChange={e => handleUpdatePlayer(p.id, 'name', e.target.value)} className="bg-transparent text-white font-bold outline-none border-b border-transparent focus:border-gold-500 w-full" /></td>
                        <td className="p-3"><input type="number" value={p.score} onChange={e => handleUpdatePlayer(p.id, 'score', parseInt(e.target.value) || 0)} className="bg-transparent text-gold-400 font-mono outline-none border-b border-transparent focus:border-gold-500 w-24" /></td>
                        <td className="p-3 text-center"><span className="text-purple-300 font-mono font-bold">{p.stealsCount || 0}</span></td>
-                       <td className="p-3 flex items-center justify-center gap-3">
-                          <button type="button" onClick={() => handleUseWildcard(p)} disabled={(p.wildcardsUsed || 0) >= 4} className={`flex items-center gap-2 px-3 py-1 rounded text-[10px] font-bold uppercase transition-all ${(p.wildcardsUsed || 0) >= 4 ? 'bg-zinc-800 text-zinc-500 border border-zinc-700' : 'bg-gold-600/20 text-gold-500 hover:bg-gold-600/40 border border-gold-600/50'}`}><Star className={`w-3 h-3 ${(p.wildcardsUsed || 0) >= 4 ? 'text-zinc-500' : 'text-gold-500 fill-gold-500'}`} />{ (p.wildcardsUsed || 0) >= 4 ? 'MAX' : 'Use' }</button>
-                          <button type="button" onClick={() => handleResetWildcard(p)} disabled={!p.wildcardsUsed} className="p-1.5 rounded text-zinc-500 hover:text-white hover:bg-zinc-700 disabled:opacity-30"><RotateCcw className="w-3 h-3" /></button>
+                       <td className="p-3">
+                          <div className="flex items-center justify-center gap-3">
+                            <button 
+                              type="button" 
+                              title="Increment Wildcard Usage"
+                              onClick={() => handleUseWildcard(p.id)} 
+                              disabled={(p.wildcardsUsed || 0) >= 4 || processingWildcards.has(p.id)} 
+                              className={`flex items-center gap-2 px-3 py-1 rounded text-[10px] font-bold uppercase transition-all ${(p.wildcardsUsed || 0) >= 4 ? 'bg-zinc-800 text-zinc-500 border border-zinc-700' : 'bg-gold-600/20 text-gold-500 hover:bg-gold-600/40 border border-gold-600/50'}`}
+                            >
+                              {processingWildcards.has(p.id) ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Star className={`w-3 h-3 ${(p.wildcardsUsed || 0) >= 4 ? 'text-zinc-500' : 'text-gold-500 fill-gold-500'}`} />}
+                              { (p.wildcardsUsed || 0) >= 4 ? 'MAX 4 USED' : `${p.wildcardsUsed || 0}/4` }
+                            </button>
+                            <button 
+                              type="button" 
+                              title="Reset Wildcards"
+                              onClick={() => handleResetWildcard(p.id)} 
+                              disabled={(p.wildcardsUsed || 0) === 0} 
+                              className="p-1.5 rounded text-zinc-500 hover:text-white hover:bg-zinc-700 disabled:opacity-30"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                          </div>
                        </td>
                        <td className="p-3 text-right"><button type="button" onClick={() => handleDeletePlayer(p)} className="text-zinc-600 hover:text-red-500 p-1"><Trash2 className="w-4 h-4" /></button></td>
                      </tr>
@@ -756,14 +597,13 @@ export const DirectorPanel: React.FC<Props> = ({
           </div>
         )}
 
-        {/* === CONFIG EDITOR === */}
+        {/* === CONFIG TAB === */}
         {activeTab === 'GAME' && (
           <div className="max-w-xl mx-auto space-y-6">
              <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Production Settings</h3>
              <div className="space-y-2"><label className="text-xs uppercase text-zinc-500 font-bold">Show Title</label><input value={gameState.showTitle} onChange={e => handleUpdateTitle(e.target.value)} className="w-full bg-black border border-zinc-800 p-3 rounded text-white focus:border-gold-500 outline-none font-bold" /></div>
           </div>
         )}
-
       </div>
 
       {/* QUESTION EDIT MODAL */}
@@ -772,20 +612,12 @@ export const DirectorPanel: React.FC<Props> = ({
         const cat = gameState.categories[cIdx];
         const q = cat.questions[qIdx];
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="w-full max-w-lg bg-zinc-900 border border-gold-500/50 rounded-xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
               <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2"><div><h3 className="text-gold-500 font-bold">{cat.title} // {q.points}</h3>{q.isVoided && <span className="text-red-500 text-xs font-bold uppercase tracking-wider">Voided</span>}</div><button type="button" onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button></div>
               <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
                 <div><label className="text-xs uppercase text-zinc-500 font-bold">Question</label><textarea id="dir-q-text" defaultValue={q.text} className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-24 focus:border-gold-500 outline-none font-bold" /></div>
                 <div><label className="text-xs uppercase text-zinc-500 font-bold">Answer</label><textarea id="dir-q-answer" defaultValue={q.answer} className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-16 focus:border-gold-500 outline-none font-bold" /></div>
-                <div className="bg-zinc-950 p-3 rounded border border-zinc-800"><p className="text-xs text-zinc-500 uppercase font-bold mb-2 flex items-center gap-2"><Wand2 className="w-3 h-3" /> AI Replace</p>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={async () => handleAiReplace(cIdx, qIdx, 'easy')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Easy</button>
-                    <button type="button" onClick={async () => handleAiReplace(cIdx, qIdx, 'medium')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Med</button>
-                    <button type="button" onClick={async () => handleAiReplace(cIdx, qIdx, 'hard')} disabled={aiLoading} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs py-2 rounded">Hard</button>
-                  </div>
-                  {aiLoading && <div className="mt-2 text-center text-xs text-gold-500 animate-pulse">Generating...</div>}
-                </div>
               </div>
               <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-zinc-800">
                 <button type="button" onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>

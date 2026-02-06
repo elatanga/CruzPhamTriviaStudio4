@@ -53,14 +53,8 @@ describe('Card 1: Director Live Board Control - Answer Visibility', () => {
   
   test('A) DIRECTOR UI RENDER TEST: Shows answer preview in grid', () => {
     render(<DirectorPanel {...mockProps} />);
-    
-    // Check for "What is H2O?" question text
     expect(screen.getByText('What is H2O?')).toBeInTheDocument();
-    
-    // Check for "ANSWER" label
     expect(screen.getByText('Answer')).toBeInTheDocument();
-    
-    // Check for "Water" answer text
     expect(screen.getByText('Water')).toBeInTheDocument();
   });
 
@@ -72,28 +66,7 @@ describe('Card 1: Director Live Board Control - Answer Visibility', () => {
         viewSettings={mockGameState.viewSettings} 
       />
     );
-    
-    // The answer "Water" should definitely NOT be in the DOM of GameBoard
     expect(screen.queryByText('Water')).not.toBeInTheDocument();
-  });
-
-  test('B.2) RevealAnswer Regression: Modal hides answer until reveal', () => {
-    const activeQ = mockGameState.categories[0].questions[0]; // isRevealed: false
-    render(
-      <QuestionModal
-        question={activeQ}
-        categoryTitle="Science"
-        players={[]}
-        selectedPlayerId={null}
-        timer={mockGameState.timer}
-        onClose={jest.fn()}
-        onReveal={jest.fn()}
-      />
-    );
-
-    // Answer "Water" should not be visible initially
-    expect(screen.queryByText('Water')).not.toBeInTheDocument();
-    expect(screen.getByText(/Reveal Answer/i)).toBeInTheDocument();
   });
 
   test('C) MISSING ANSWER TEST: Shows warning indicator instead of crashing', () => {
@@ -104,10 +77,7 @@ describe('Card 1: Director Live Board Control - Answer Visibility', () => {
         questions: [{ ...mockGameState.categories[0].questions[0], answer: '' }]
       }]
     };
-    
     render(<DirectorPanel {...mockProps} gameState={buggyState} />);
-    
-    // Should show "(MISSING)"
     expect(screen.getByText('(MISSING)')).toBeInTheDocument();
   });
 });

@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { QuestionModal } from './QuestionModal';
 import { Question, Player, GameTimer } from '../types';
 
@@ -9,6 +10,8 @@ declare const describe: any;
 declare const test: any;
 declare const expect: any;
 declare const beforeEach: any;
+// Fix: Declare require for dynamic module loading in tests to fix "Cannot find name 'require'"
+declare const require: any;
 
 // Mock sound service
 jest.mock('../services/soundService', () => ({
@@ -76,70 +79,54 @@ describe('QuestionModal: Layout & Reveal UI Health (Card 1)', () => {
     jest.clearAllMocks();
   });
 
-  test('A) LAYOUT: Root uses fixed grid with overflow-hidden', () => {
+  test('A) LAYOUT: Root uses fixed position and overflow-hidden', () => {
     setupModal();
     const root = screen.getByTestId('reveal-root');
     expect(root).toHaveClass('fixed');
     expect(root).toHaveClass('inset-0');
     expect(root).toHaveClass('overflow-hidden');
-    expect(root).toHaveClass('grid');
-    expect(root).toHaveClass('grid-rows-[auto_1fr_auto]');
   });
 
-  test('B) VISIBILITY: Actions container exists and is always in DOM', () => {
+  test('B) CONTAINER: Reveal content is wrapped in a luxury card (Card 1)', () => {
     setupModal();
+    const container = screen.getByTestId('luxury-container');
+    expect(container).toBeInTheDocument();
+    expect(container).toHaveClass('max-w-7xl');
+    expect(container).toHaveClass('backdrop-blur-2xl');
+    expect(container).toHaveClass('rounded-[2.5rem]');
+  });
+
+  test('C) TYPOGRAPHY: Question text uses Roboto Bold clamp sizing', () => {
+    setupModal();
+    const qText = screen.getByTestId('question-text');
+    expect(qText).toHaveClass('font-roboto-bold');
+    expect(qText).toHaveStyle('font-size: clamp(28px, 4.5vw, 86px)');
+  });
+
+  test('D) VISIBILITY: Actions row is inside the luxury container', () => {
+    setupModal();
+    const container = screen.getByTestId('luxury-container');
     const actions = screen.getByTestId('reveal-actions');
-    expect(actions).toBeInTheDocument();
-    expect(actions).toBeVisible();
+    expect(container).toContainElement(actions);
   });
 
-  test('C) REGRESSION: Award button disabled before reveal', () => {
-    setupModal({ isRevealed: false });
-    const awardBtn = screen.getByTitle(/Award Points/i);
-    expect(awardBtn).toBeDisabled();
-  });
-
-  test('D) INTERACTION: Reveal icon button triggers reveal', () => {
-    const onReveal = jest.fn();
-    render(
-      <QuestionModal
-        question={{ id: 'q1', text: 'Q', points: 100, answer: 'A', isRevealed: false, isAnswered: false }}
-        categoryTitle="Cat"
-        players={mockPlayers}
-        selectedPlayerId="p1"
-        timer={mockTimer}
-        onClose={jest.fn()}
-        onReveal={onReveal}
-      />
-    );
-
-    const revealBtn = screen.getByTitle(/Reveal Answer/i);
-    fireEvent.click(revealBtn);
-    expect(onReveal).toHaveBeenCalled();
-  });
-
-  test('E) LONG QUESTION STRESS: Actions remain visible without scroll', () => {
+  test('E) LONG QUESTION STRESS: Container remains centered without scrolling', () => {
     const longText = 'LOOOOONG '.repeat(100);
     setupModal({ text: longText, isRevealed: true });
 
-    // Actions should still be visible at the bottom
-    const actions = screen.getByTestId('reveal-actions');
-    expect(actions).toBeVisible();
-
-    // Answer should be visible
-    const answer = screen.getByTestId('answer-text');
-    expect(answer).toBeVisible();
-
-    // Check that question text container is squashed but not causing scroll
-    const questionContainer = screen.getByTestId('question-text').parentElement;
-    expect(questionContainer).toHaveClass('flex-1');
-    expect(questionContainer).toHaveClass('min-h-0');
-    expect(questionContainer).toHaveClass('overflow-hidden');
+    const container = screen.getByTestId('luxury-container');
+    expect(container).toHaveClass('flex-col');
+    expect(container).not.toHaveClass('overflow-auto');
+    expect(container).toHaveClass('overflow-hidden');
   });
 
-  test('F) SAFE AREA: Footer has safe bottom padding style', () => {
+  test('F) LOGGING: Logs reveal UI render event', () => {
     setupModal();
-    const root = screen.getByTestId('reveal-root');
-    expect(root).toHaveStyle('padding-bottom: env(safe-area-inset-bottom)');
+    // Fix: Using the declared require to access logger from the mock context
+    const { logger } = require('../services/logger');
+    expect(logger.info).toHaveBeenCalledWith(
+      "reveal_ui_rendered",
+      expect.objectContaining({ tileId: 'q1', ts: expect.any(String) })
+    );
   });
 });

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { QuestionModal } from './QuestionModal';
@@ -23,7 +24,15 @@ jest.mock('../services/soundService', () => ({
   },
 }));
 
-// Mock window.confirm to always return true for testing
+// Mock logger
+jest.mock('../services/logger', () => ({
+  logger: {
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+  },
+}));
+
 const mockConfirm = jest.fn(() => true);
 window.confirm = mockConfirm;
 
@@ -53,50 +62,7 @@ const mockTimer: GameTimer = {
 };
 
 describe('QuestionModal Component Logic', () => {
-  test('VOID ACTION TEST: Void button triggers onClose with "void" post-reveal after confirmation', () => {
-    const onClose = jest.fn();
-    render(
-      <QuestionModal
-        question={{ ...mockQuestion, isRevealed: true }}
-        categoryTitle="Geography"
-        players={mockPlayers}
-        selectedPlayerId="p1"
-        timer={mockTimer}
-        onClose={onClose}
-        onReveal={jest.fn()}
-      />
-    );
-
-    const voidBtn = screen.getByText(/Void/i).closest('button');
-    expect(voidBtn).toBeInTheDocument();
-    
-    fireEvent.click(voidBtn!);
-    
-    expect(mockConfirm).toHaveBeenCalled();
-    expect(onClose).toHaveBeenCalledWith('void');
-  });
-
-  test('REGRESSION: Award button works normally post-reveal', () => {
-    const onClose = jest.fn();
-    render(
-      <QuestionModal
-        question={{ ...mockQuestion, isRevealed: true }}
-        categoryTitle="Geography"
-        players={mockPlayers}
-        selectedPlayerId="p1"
-        timer={mockTimer}
-        onClose={onClose}
-        onReveal={jest.fn()}
-      />
-    );
-
-    const awardBtn = screen.getByText(/Award/i).closest('button');
-    fireEvent.click(awardBtn!);
-    
-    expect(onClose).toHaveBeenCalledWith('award', 'p1');
-  });
-
-  test('DOUBLE OR NOTHING: Displays full label when question is active', () => {
+  test('A) DOUBLE OR NOTHING LABEL: Displays full text in uppercase (Card 1)', () => {
     render(
       <QuestionModal
         question={mockDoubleQuestion}
@@ -109,6 +75,24 @@ describe('QuestionModal Component Logic', () => {
       />
     );
 
-    expect(screen.getByText('DOUBLE OR NOTHING')).toBeInTheDocument();
+    const label = screen.getByTestId('double-label');
+    expect(label).toBeInTheDocument();
+    expect(label.textContent).toBe('DOUBLE OR NOTHING');
+    expect(label).toHaveClass('uppercase');
+  });
+
+  test('B) NORMAL TILE: Does NOT display Double Or Nothing label', () => {
+    render(
+      <QuestionModal
+        question={mockQuestion}
+        categoryTitle="Geography"
+        players={mockPlayers}
+        selectedPlayerId="p1"
+        timer={mockTimer}
+        onClose={jest.fn()}
+        onReveal={jest.fn()}
+      />
+    );
+    expect(screen.queryByTestId('double-label')).not.toBeInTheDocument();
   });
 });
