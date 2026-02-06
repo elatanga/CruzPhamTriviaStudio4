@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { Scoreboard } from './Scoreboard';
@@ -36,6 +37,10 @@ const mockViewSettings: BoardViewSettings = {
   boardFontScale: 1.0,
   tileScale: 1.0,
   scoreboardScale: 1.0,
+  categoryFontSizeScale: 1.0,
+  tileFontSizeScale: 1.0,
+  playerNameFontSizeScale: 1.0,
+  tilePaddingScale: 1.0,
   updatedAt: new Date().toISOString(),
 };
 

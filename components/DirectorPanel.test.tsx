@@ -37,7 +37,16 @@ const mockGameState: GameState = {
   selectedPlayerId: null,
   history: [],
   timer: { duration: 30, endTime: null, isRunning: false },
-  viewSettings: { boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, updatedAt: '' },
+  viewSettings: { 
+    boardFontScale: 1.0, 
+    tileScale: 1.0, 
+    scoreboardScale: 1.0, 
+    categoryFontSizeScale: 1.0,
+    tileFontSizeScale: 1.0,
+    playerNameFontSizeScale: 1.0,
+    tilePaddingScale: 1.0,
+    updatedAt: '' 
+  },
   lastPlays: [],
   events: []
 };

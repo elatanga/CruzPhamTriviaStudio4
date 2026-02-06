@@ -62,6 +62,10 @@ const App: React.FC = () => {
       boardFontScale: 1.0,
       tileScale: 1.0,
       scoreboardScale: 1.0,
+      categoryFontSizeScale: 1.0,
+      tileFontSizeScale: 1.0,
+      playerNameFontSizeScale: 1.0,
+      tilePaddingScale: 1.0,
       updatedAt: new Date().toISOString()
     },
     lastPlays: [],
@@ -264,17 +268,23 @@ const App: React.FC = () => {
          const savedState = localStorage.getItem('cruzpham_gamestate');
          if (savedState) {
            const parsed = JSON.parse(savedState);
+           // Hydrate scales if missing (Backwards compatibility)
            if (!parsed.viewSettings) {
-             parsed.viewSettings = { boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, updatedAt: new Date().toISOString() };
-           } else if (parsed.viewSettings.scoreboardScale === undefined) {
-             parsed.viewSettings.scoreboardScale = 1.0;
+             parsed.viewSettings = { 
+               boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, 
+               categoryFontSizeScale: 1.0, tileFontSizeScale: 1.0, playerNameFontSizeScale: 1.0, tilePaddingScale: 1.0,
+               updatedAt: new Date().toISOString() 
+             };
+           } else {
+             if (parsed.viewSettings.categoryFontSizeScale === undefined) parsed.viewSettings.categoryFontSizeScale = 1.0;
+             if (parsed.viewSettings.tileFontSizeScale === undefined) parsed.viewSettings.tileFontSizeScale = 1.0;
+             if (parsed.viewSettings.playerNameFontSizeScale === undefined) parsed.viewSettings.playerNameFontSizeScale = 1.0;
+             if (parsed.viewSettings.tilePaddingScale === undefined) parsed.viewSettings.tilePaddingScale = 1.0;
            }
-           if (!parsed.lastPlays) {
-             parsed.lastPlays = [];
-           }
-           if (!parsed.events) {
-             parsed.events = [];
-           }
+           
+           if (!parsed.lastPlays) parsed.lastPlays = [];
+           if (!parsed.events) parsed.events = [];
+           
            setGameState(parsed);
            if (parsed.showTitle && !activeShow) {
               setActiveShow(prev => prev || { id: 'restored-ghost', userId: 'restored', title: parsed.showTitle, createdAt: '' });
@@ -388,7 +398,11 @@ const App: React.FC = () => {
       selectedPlayerId: initPlayers.length > 0 ? initPlayers[0].id : null,
       history: [`Started: ${template.topic}`],
       timer: { duration: 30, endTime: null, isRunning: false },
-      viewSettings: gameState.viewSettings || { boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, updatedAt: new Date().toISOString() },
+      viewSettings: gameState.viewSettings || { 
+        boardFontScale: 1.0, tileScale: 1.0, scoreboardScale: 1.0, 
+        categoryFontSizeScale: 1.0, tileFontSizeScale: 1.0, playerNameFontSizeScale: 1.0, tilePaddingScale: 1.0,
+        updatedAt: new Date().toISOString() 
+      },
       lastPlays: [],
       events: [] // Reset events for new session
     };
@@ -418,7 +432,6 @@ const App: React.FC = () => {
       activeCategoryId: null,
       timer: { ...gameState.timer, endTime: null, isRunning: false },
       lastPlays: []
-      // We keep events in memory for download stability
     };
     saveGameState(newState);
     setViewMode('BOARD');
@@ -524,10 +537,8 @@ const App: React.FC = () => {
         notes: activeQ.isDoubleOrNothing ? 'Double or Nothing Applied' : undefined
       };
 
-      // Ring Buffer: newest first, max 4
       updatedPlays = [playEvent, ...updatedPlays].slice(0, 4);
 
-      // Safe App Logging
       logger.info("game_play_event", {
         atIso: playEvent.atIso,
         atMs: playEvent.atMs,

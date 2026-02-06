@@ -1,10 +1,13 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp } from 'lucide-react';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp, Sparkles, Sliders, Loader2 } from 'lucide-react';
 import { GameState, Question, Difficulty, Category, BoardViewSettings, Player, PlayEvent, AnalyticsEventType, GameAnalyticsEvent } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
 import { soundService } from '../services/soundService';
-import { normalizePlayerName } from '../services/utils';
+import { normalizePlayerName, applyAiCategoryPreservePoints } from '../services/utils';
+import { DirectorAiRegenerator } from './DirectorAiRegenerator';
+import { DirectorSettingsPanel } from './DirectorSettingsPanel';
 
 interface Props {
   gameState: GameState;
@@ -20,28 +23,23 @@ interface Props {
 export const DirectorPanel: React.FC<Props> = ({ 
   gameState, onUpdateState, emitGameEvent, onPopout, isPoppedOut, onBringBack, addToast, onClose 
 }) => {
-  const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD' | 'STATS'>('BOARD');
+  const [activeTab, setActiveTab] = useState<'GAME' | 'PLAYERS' | 'BOARD' | 'STATS' | 'SETTINGS'>('BOARD');
   const [editingQuestion, setEditingQuestion] = useState<{cIdx: number, qIdx: number} | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [confirmResetAllWildcards, setConfirmResetAllWildcards] = useState(false);
   const [isLogsExpanded, setIsLogsExpanded] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
   
-  // Card 1: Track processing states to prevent races and handle optimistic UI
   const [processingWildcards, setProcessingWildcards] = useState<Set<string>>(new Set());
-
-  // Add Player State
   const [isAddingPlayer, setIsAddingPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
 
-  // Auto-scroll logs to bottom on new event if expanded
   useEffect(() => {
     if (logContainerRef.current && isLogsExpanded) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [gameState.events, isLogsExpanded]);
 
-  // --- SELECTORS ---
   const boardStats = useMemo(() => {
     const allQs = (gameState.categories || []).flatMap(c => c.questions);
     const total = allQs.length;
@@ -50,247 +48,51 @@ export const DirectorPanel: React.FC<Props> = ({
     const doubles = allQs.filter(q => q.isDoubleOrNothing).length;
     const remaining = total - (answered + voided);
     const progress = total > 0 ? (answered / total) * 100 : 0;
-
     return { total, answered, voided, remaining, progress, doubles };
   }, [gameState.categories]);
 
-  const activeQuestionInfo = useMemo(() => {
-    if (!gameState.activeQuestionId) return null;
-    const cat = gameState.categories.find(c => c.id === gameState.activeCategoryId);
-    const q = cat?.questions.find(q => q.id === gameState.activeQuestionId);
-    return { catTitle: cat?.title, points: q?.points, isRevealed: q?.isRevealed };
-  }, [gameState.activeQuestionId, gameState.activeCategoryId, gameState.categories]);
+  // --- AI ACTIONS ---
 
-  // --- ACTIONS ---
-
-  const handleUpdateTitle = (title: string) => {
-    onUpdateState({ ...gameState, showTitle: title });
-  };
-
-  const handleUpdatePlayer = (id: string, field: 'name' | 'score', value: string | number) => {
-    const oldP = gameState.players.find(p => p.id === id);
-    let finalValue = value;
-    
-    if (field === 'name') {
-       finalValue = normalizePlayerName(value as string);
-       // Skip update if empty
-       if (!finalValue) return;
-       emitGameEvent('PLAYER_EDITED', { actor: { role: 'director' }, context: { playerId: id, playerName: finalValue, before: oldP?.name } });
-    }
-    
-    const newPlayers = gameState.players.map(p => 
-      p.id === id ? { ...p, [field]: finalValue } : p
-    );
-    onUpdateState({ ...gameState, players: newPlayers });
-  };
-
-  const handleDeletePlayer = (p: Player) => {
-    const ts = new Date().toISOString();
-    try {
-      logger.info("player_delete_click", { playerId: p.id, name: p.name, ts });
-      
-      if (!p.id) {
-        logger.error("player_delete_failed", { playerId: "undefined", message: "Missing Player ID", ts });
-        addToast('error', 'DELETE FAILED — RETRY');
-        return;
-      }
-
-      soundService.playClick();
-      if (!confirm(`Are you sure you want to permanently remove ${p.name}?`)) {
-        return;
-      }
-
-      const updatedPlayers = (gameState.players || []).filter(x => x.id !== p.id);
-      
-      let newSelectedId = gameState.selectedPlayerId;
-      if (gameState.selectedPlayerId === p.id) {
-        newSelectedId = updatedPlayers.length > 0 ? updatedPlayers[0].id : null;
-      }
-
-      onUpdateState({
-        ...gameState,
-        players: updatedPlayers,
-        selectedPlayerId: newSelectedId
-      });
-
-      emitGameEvent('PLAYER_REMOVED', { 
-        actor: { role: 'director' }, 
-        context: { playerName: p.name, playerId: p.id, note: 'Player removed from roster' } 
-      });
-
-      logger.info("player_delete_success", { playerId: p.id, ts: new Date().toISOString() });
-      addToast('success', 'PLAYER REMOVED');
-    } catch (err: any) {
-      logger.error("player_delete_failed", { playerId: p.id, message: err.message, ts: new Date().toISOString() });
-      addToast('error', 'DELETE FAILED — RETRY');
-    }
-  };
-
-  const handleDirectorAddPlayer = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const finalName = normalizePlayerName(newPlayerName);
-    
-    if (!finalName || finalName.length < 2) {
-      addToast('error', 'ENTER PLAYER NAME');
-      logger.warn('director_player_add_skipped_empty_name', { input: newPlayerName });
-      return;
-    }
-
-    if (gameState.players.length >= 8) {
-      addToast('error', 'Maximum 8 players reached.');
-      return;
-    }
-
-    let uniqueName = finalName;
-    let count = 2;
-    const existingNames = gameState.players.map(p => p.name.toUpperCase());
-    while (existingNames.includes(uniqueName)) {
-      uniqueName = `${finalName} ${count}`;
-      count++;
-    }
-
-    const newPlayer: Player = { 
-      id: crypto.randomUUID(), 
-      name: uniqueName, 
-      score: 0, 
-      color: '#fff', 
-      wildcardsUsed: 0, 
-      wildcardActive: false, 
-      stealsCount: 0 
-    };
-
+  const handleAiRewriteCategory = async (cIdx: number) => {
+    if (aiLoading) return;
     soundService.playClick();
-    const newPlayers = [...gameState.players, newPlayer];
+    const cat = gameState.categories[cIdx];
+    const genId = crypto.randomUUID();
     
-    emitGameEvent('PLAYER_ADDED', {
-       actor: { role: 'director' },
-       context: { playerName: uniqueName, playerId: newPlayer.id, note: 'Contestant added via Producer Panel' }
-    });
-
-    onUpdateState({ 
-      ...gameState, 
-      players: newPlayers,
-      selectedPlayerId: gameState.selectedPlayerId || newPlayer.id 
-    });
-
-    addToast('success', `Added ${uniqueName}`);
-    setNewPlayerName('');
-    setIsAddingPlayer(false);
-  };
-
-  // CARD 1: Robust Wildcard Implementation
-  const handleUseWildcard = async (playerId: string) => {
-    const ts = new Date().toISOString();
+    setAiLoading(true);
+    addToast('info', `AI is rewriting ${cat.title}...`);
     
-    const targetPlayer = gameState.players.find(p => p.id === playerId);
-    if (!targetPlayer) {
-      logger.warn("wildcard_player_missing", { playerId, ts });
-      return;
-    }
-
-    const prevCount = targetPlayer.wildcardsUsed || 0;
-    const nextCount = Math.min(4, prevCount + 1);
-
-    if (nextCount === prevCount) {
-      if (nextCount === 4) addToast('info', `${targetPlayer.name} has reached max wildcards.`);
-      return;
-    }
-
-    logger.info("wildcard_click", { playerId, prevCount, nextCount, ts });
-
-    setProcessingWildcards(prev => new Set(prev).add(playerId));
-    soundService.playClick();
-
-    // OPTIMISTIC UPDATE: Instant UI Sync
-    const newPlayers = gameState.players.map(p => 
-      p.id === playerId ? { ...p, wildcardsUsed: nextCount } : p
-    );
-    onUpdateState({ ...gameState, players: newPlayers });
-    logger.info("wildcard_optimistic_applied", { playerId, nextCount, ts });
+    logger.info('director_ai_category_regen_start', { categoryId: cat.id, categoryName: cat.title, genId });
+    emitGameEvent('AI_CATEGORY_REPLACE_START', { actor: { role: 'director' }, context: { categoryIndex: cIdx, categoryName: cat.title } });
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      emitGameEvent('WILDCARD_USED', {
-        actor: { role: 'director' },
-        context: { playerName: targetPlayer.name, playerId: targetPlayer.id, delta: nextCount }
-      });
-      
-      logger.info("wildcard_persist_ok", { playerId, nextCount, ts });
-      addToast('success', `${targetPlayer.name}: Wildcard Used (${nextCount}/4)`);
-    } catch (err: any) {
-      logger.error("wildcard_persist_failed", { playerId, prevCount, attempted: nextCount, error: err.message, ts });
-      
-      // ROLLBACK: Revert state if sync fails
-      const rollbackPlayers = gameState.players.map(p => 
-        p.id === playerId ? { ...p, wildcardsUsed: prevCount } : p
+      const newQs = await generateCategoryQuestions(
+        gameState.showTitle || "General Trivia", 
+        cat.title, 
+        cat.questions.length, 
+        'mixed', 
+        100, 
+        genId
       );
-      onUpdateState({ ...gameState, players: rollbackPlayers });
-      addToast('error', `Sync Failed for ${targetPlayer.name}`);
+
+      const nextCategories = [...gameState.categories];
+      nextCategories[cIdx] = applyAiCategoryPreservePoints(cat, newQs);
+
+      onUpdateState({ ...gameState, categories: nextCategories });
+      
+      logger.info('director_ai_category_regen_success', { categoryId: cat.id, preservedPointScale: true, genId });
+      emitGameEvent('AI_CATEGORY_REPLACE_APPLIED', { actor: { role: 'director' }, context: { categoryIndex: cIdx } });
+      addToast('success', `${cat.title} updated.`);
+    } catch (e: any) {
+      logger.error('director_ai_category_regen_failed', { categoryId: cat.id, error: e.message, genId });
+      emitGameEvent('AI_CATEGORY_REPLACE_FAILED', { actor: { role: 'director' }, context: { note: e.message } });
+      addToast('error', 'AI rewrite failed.');
     } finally {
-      setProcessingWildcards(prev => {
-        const next = new Set(prev);
-        next.delete(playerId);
-        return next;
-      });
+      setAiLoading(false);
     }
   };
 
-  const handleResetWildcard = async (playerId: string) => {
-    const ts = new Date().toISOString();
-    const targetPlayer = gameState.players.find(p => p.id === playerId);
-    if (!targetPlayer || (targetPlayer.wildcardsUsed || 0) === 0) return;
-
-    soundService.playClick();
-    const prevCount = targetPlayer.wildcardsUsed || 0;
-    const newPlayers = gameState.players.map(p => 
-      p.id === playerId ? { ...p, wildcardsUsed: 0 } : p
-    );
-    
-    onUpdateState({ ...gameState, players: newPlayers });
-    
-    emitGameEvent('WILDCARD_RESET', {
-       actor: { role: 'director' },
-       context: { playerName: targetPlayer.name, playerId: targetPlayer.id }
-    });
-    addToast('info', `Wildcards reset for ${targetPlayer.name}`);
-    logger.info("wildcard_reset_manual", { playerId, prevCount, ts });
-  };
-
-  const handleResetAllWildcards = () => {
-    if (!confirmResetAllWildcards) {
-      soundService.playClick();
-      setConfirmResetAllWildcards(true);
-      setTimeout(() => setConfirmResetAllWildcards(false), 3000); 
-      return;
-    }
-
-    soundService.playClick();
-    const newPlayers = gameState.players.map(p => ({ ...p, wildcardsUsed: 0 }));
-    onUpdateState({ ...gameState, players: newPlayers });
-    
-    emitGameEvent('WILDCARD_RESET', {
-       actor: { role: 'director' },
-       context: { note: 'Global bulk reset' }
-    });
-
-    addToast('success', 'All wildcards reset');
-    setConfirmResetAllWildcards(false);
-    logger.info("wildcard_reset_all_manual", { ts: new Date().toISOString() });
-  };
-
-  // --- UTILS FOR BOARD EDITOR ---
-
-  const handleUpdateCategoryTitle = (cIdx: number, title: string) => {
-    const oldTitle = gameState.categories[cIdx].title;
-    emitGameEvent('CATEGORY_RENAMED', {
-       actor: { role: 'director' },
-       context: { categoryIndex: cIdx, categoryName: title, before: oldTitle }
-    });
-    const newCats = [...gameState.categories];
-    newCats[cIdx].title = title;
-    onUpdateState({ ...gameState, categories: newCats });
-  };
+  // --- SETTINGS ACTIONS ---
 
   const updateViewSettings = (updates: Partial<BoardViewSettings>) => {
     emitGameEvent('VIEW_SETTINGS_CHANGED', { actor: { role: 'director' }, context: { after: updates } });
@@ -302,231 +104,156 @@ export const DirectorPanel: React.FC<Props> = ({
         updatedAt: new Date().toISOString()
       }
     });
-    soundService.playClick();
   };
 
-  const updateTimer = (updates: Partial<typeof gameState.timer>) => {
+  const handleUpdatePlayer = (id: string, field: 'name' | 'score', value: string | number) => {
+    const oldP = gameState.players.find(p => p.id === id);
+    let finalValue = value;
+    if (field === 'name') {
+       finalValue = normalizePlayerName(value as string);
+       if (!finalValue) return;
+       emitGameEvent('PLAYER_EDITED', { actor: { role: 'director' }, context: { playerId: id, playerName: finalValue, before: oldP?.name } });
+    }
+    const newPlayers = gameState.players.map(p => p.id === id ? { ...p, [field]: finalValue } : p);
+    onUpdateState({ ...gameState, players: newPlayers });
+  };
+
+  const handleUseWildcard = async (playerId: string) => {
+    const targetPlayer = gameState.players.find(p => p.id === playerId);
+    if (!targetPlayer) return;
+    const nextCount = Math.min(4, (targetPlayer.wildcardsUsed || 0) + 1);
+    setProcessingWildcards(prev => new Set(prev).add(playerId));
     soundService.playClick();
-    if (updates.duration) {
-      emitGameEvent('TIMER_CONFIG_CHANGED', { actor: { role: 'director' }, context: { delta: updates.duration } });
+    onUpdateState({ ...gameState, players: gameState.players.map(p => p.id === playerId ? { ...p, wildcardsUsed: nextCount } : p) });
+    emitGameEvent('WILDCARD_USED', { actor: { role: 'director' }, context: { playerName: targetPlayer.name, playerId: targetPlayer.id, delta: nextCount } });
+    setProcessingWildcards(prev => { const n = new Set(prev); n.delete(playerId); return n; });
+  };
+
+  const handleUpdateCategoryTitle = (cIdx: number, val: string) => {
+    const nextCategories = [...gameState.categories];
+    nextCategories[cIdx] = { ...nextCategories[cIdx], title: val };
+    onUpdateState({ ...gameState, categories: nextCategories });
+  };
+
+  const handleDirectorAddPlayer = (e: React.FormEvent) => {
+    e.preventDefault();
+    const finalName = normalizePlayerName(newPlayerName);
+    if (!finalName) return;
+    
+    let uniqueName = finalName;
+    let count = 2;
+    const existingNames = gameState.players.map(p => p.name.toUpperCase());
+    while (existingNames.includes(uniqueName)) {
+      uniqueName = `${finalName} ${count}`;
+      count++;
+    }
+    
+    const newPlayer: Player = { id: crypto.randomUUID(), name: uniqueName, score: 0, color: '#fff', wildcardsUsed: 0, wildcardActive: false, stealsCount: 0 };
+    onUpdateState({ ...gameState, players: [...gameState.players, newPlayer] });
+    emitGameEvent('PLAYER_ADDED', { actor: { role: 'director' }, context: { playerName: uniqueName, playerId: newPlayer.id } });
+    setNewPlayerName('');
+    setIsAddingPlayer(false);
+    addToast('success', `Added ${uniqueName}`);
+  };
+
+  const handleResetAllWildcards = () => {
+    if (!confirmResetAllWildcards) {
+      setConfirmResetAllWildcards(true);
+      setTimeout(() => setConfirmResetAllWildcards(false), 3000);
+      return;
     }
     onUpdateState({
       ...gameState,
-      timer: { ...gameState.timer, ...updates }
+      players: gameState.players.map(p => ({ ...p, wildcardsUsed: 0, wildcardActive: false }))
     });
+    emitGameEvent('WILDCARD_RESET', { actor: { role: 'director' } });
+    setConfirmResetAllWildcards(false);
+    addToast('info', 'All wildcards reset.');
   };
 
-  const startTimer = () => {
-    emitGameEvent('TIMER_STARTED', { actor: { role: 'director' }, context: { points: gameState.timer.duration } });
-    updateTimer({
-      endTime: Date.now() + (gameState.timer.duration * 1000),
-      isRunning: true
+  const handleDeletePlayer = (player: Player) => {
+    if (confirm(`Remove ${player.name} from the game?`)) {
+      const nextPlayers = gameState.players.filter(p => p.id !== player.id);
+      let nextSelectedId = gameState.selectedPlayerId;
+      if (nextSelectedId === player.id) {
+        nextSelectedId = nextPlayers.length > 0 ? nextPlayers[0].id : null;
+      }
+      onUpdateState({ ...gameState, players: nextPlayers, selectedPlayerId: nextSelectedId });
+      emitGameEvent('PLAYER_REMOVED', { actor: { role: 'director' }, context: { playerName: player.name, playerId: player.id } });
+      addToast('info', `${player.name} removed.`);
+    }
+  };
+
+  const handleSaveQuestion = (cIdx: number, qIdx: number, updates: Partial<Question>) => {
+    const nextCategories = [...gameState.categories];
+    const cat = nextCategories[cIdx];
+    const nextQs = [...cat.questions];
+    const oldQ = nextQs[qIdx];
+    nextQs[qIdx] = { ...oldQ, ...updates };
+    nextCategories[cIdx] = { ...cat, questions: nextQs };
+    
+    onUpdateState({ ...gameState, categories: nextCategories });
+    emitGameEvent('QUESTION_EDITED', { 
+      actor: { role: 'director' }, 
+      context: { 
+        tileId: oldQ.id, 
+        categoryName: cat.title,
+        before: { text: oldQ.text, answer: oldQ.answer },
+        after: { text: updates.text, answer: updates.answer }
+      } 
     });
-  };
-
-  const stopTimer = () => {
-    emitGameEvent('TIMER_STOPPED', { actor: { role: 'director' } });
-    updateTimer({ isRunning: false });
-  };
-
-  const resetTimer = () => {
-    emitGameEvent('TIMER_RESET', { actor: { role: 'director' } });
-    updateTimer({ endTime: null, isRunning: false });
-  };
-
-  const handleSaveQuestion = (cIdx: number, qIdx: number, q: Partial<Question>) => {
-    soundService.playClick();
-    const newCats = [...gameState.categories];
-    const oldQ = newCats[cIdx].questions[qIdx];
-    
-    emitGameEvent('QUESTION_EDITED', {
-       actor: { role: 'director' },
-       context: { tileId: oldQ.id, categoryName: newCats[cIdx].title, points: oldQ.points }
-    });
-
-    const isUnvoiding = oldQ.isVoided && !q.isVoided && q.isVoided !== undefined;
-    
-    newCats[cIdx].questions[qIdx] = { 
-      ...oldQ, 
-      ...q,
-      isVoided: q.isVoided !== undefined ? q.isVoided : oldQ.isVoided,
-      isAnswered: isUnvoiding ? false : (q.isAnswered ?? oldQ.isAnswered),
-      isRevealed: isUnvoiding ? false : (q.isRevealed ?? oldQ.isRevealed)
-    };
-    
-    onUpdateState({ ...gameState, categories: newCats });
     setEditingQuestion(null);
+    addToast('success', 'Tile updated.');
   };
-
-  // --- RENDERING ---
-
-  const getEventColor = (type: AnalyticsEventType) => {
-    if (type.includes('FAILED') || type === 'TILE_VOIDED' || type === 'PLAYER_REMOVED') return 'text-red-400';
-    if (type.includes('AWARDED') || type.includes('STARTED') || type === 'PLAYER_ADDED') return 'text-green-400';
-    if (type.includes('AI_')) return 'text-purple-400';
-    if (type.includes('STOLEN')) return 'text-orange-400';
-    if (type.includes('TIMER')) return 'text-blue-400';
-    return 'text-zinc-500';
-  };
-
-  if (isPoppedOut) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-zinc-500 space-y-4 bg-zinc-950">
-        <ExternalLink className="w-16 h-16 text-gold-500" />
-        <h2 className="text-2xl font-serif text-white">Director is Popped Out</h2>
-        <div className="flex gap-3">
-          <button type="button" onClick={onBringBack} className="bg-zinc-800 hover:bg-gold-600 hover:text-black text-white px-6 py-2 rounded font-bold uppercase tracking-wider transition-colors">Bring Back</button>
-          {onClose && <button type="button" onClick={() => { soundService.playClick(); onClose(); }} className="border border-zinc-700 hover:bg-zinc-800 text-zinc-400 hover:text-white px-6 py-2 rounded font-bold uppercase tracking-wider transition-colors flex items-center gap-2"><X className="w-4 h-4" /> Close Panel</button>}
-        </div>
-      </div>
-    );
-  }
-
-  const events = gameState.events || [];
-  const displayedEvents = isLogsExpanded 
-    ? [...events].reverse() 
-    : [...events].slice(-4).reverse();
 
   return (
     <div className="h-full flex flex-col bg-zinc-950 text-white relative">
-      {/* TOOLBAR */}
       <div className="flex-none h-14 border-b border-zinc-800 flex items-center px-4 justify-between bg-black">
-        <div className="flex items-center gap-1">
-          <button type="button" onClick={() => { soundService.playClick(); setActiveTab('BOARD'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          <button onClick={() => setActiveTab('BOARD')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 shrink-0 ${activeTab === 'BOARD' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Grid className="w-4 h-4" /> Board
           </button>
-          <button type="button" onClick={() => { soundService.playClick(); setActiveTab('PLAYERS'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button onClick={() => setActiveTab('PLAYERS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 shrink-0 ${activeTab === 'PLAYERS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <Users className="w-4 h-4" /> Players
           </button>
-          <button type="button" onClick={() => { soundService.playClick(); setActiveTab('STATS'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'STATS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+          <button onClick={() => setActiveTab('SETTINGS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 shrink-0 ${activeTab === 'SETTINGS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
+            <Sliders className="w-4 h-4" /> Settings
+          </button>
+          <button onClick={() => setActiveTab('STATS')} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 shrink-0 ${activeTab === 'STATS' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
             <BarChart3 className="w-4 h-4" /> Analytics
           </button>
-          <button type="button" onClick={() => { soundService.playClick(); setActiveTab('GAME'); }} className={`px-4 py-2 text-xs font-bold uppercase rounded flex items-center gap-2 ${activeTab === 'GAME' ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:bg-zinc-900'}`}>
-            <Settings className="w-4 h-4" /> Config
-          </button>
         </div>
-        
         <div className="flex items-center gap-2">
-          {onPopout && (
-            <button type="button" onClick={() => { soundService.playClick(); onPopout(); }} className="flex items-center gap-2 text-xs font-bold uppercase text-gold-500 border border-gold-900/50 px-3 py-1.5 rounded hover:bg-gold-900/20">
-              <ExternalLink className="w-3 h-3" /> Detach
-            </button>
-          )}
-          {onClose && (
-             <button type="button" onClick={() => { soundService.playClick(); onClose(); }} className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-400 hover:text-red-400 px-3 py-1.5 rounded hover:bg-zinc-900 transition-colors"><X className="w-4 h-4" /> Close</button>
-          )}
+          {onPopout && <button onClick={onPopout} className="hidden md:flex items-center gap-2 text-xs font-bold uppercase text-gold-500 border border-gold-900/50 px-3 py-1.5 rounded hover:bg-gold-900/20"><ExternalLink className="w-3 h-3" /> Detach</button>}
+          {onClose && <button onClick={onClose} className="flex items-center gap-2 text-xs font-bold uppercase text-zinc-400 hover:text-red-400 px-3 py-1.5 rounded hover:bg-zinc-900 transition-colors"><X className="w-4 h-4" /> Close</button>}
         </div>
       </div>
 
       <div className="flex-1 overflow-auto p-4 custom-scrollbar">
-        {/* === STATS / ANALYTICS TAB === */}
-        {activeTab === 'STATS' && (
-          <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300">
-             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-1 space-y-4">
-                  <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm flex items-center gap-2 border-b border-zinc-800 pb-2">
-                    <Info className="w-4 h-4" /> Summary Metrics
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-lg flex flex-col justify-center h-24">
-                      <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Answered</p>
-                      <span className="text-2xl font-black text-green-500">{boardStats.answered}</span>
-                    </div>
-                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-lg flex flex-col justify-center h-24">
-                      <p className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Remaining</p>
-                      <span className="text-2xl font-black text-zinc-300">{boardStats.remaining}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="lg:col-span-2 space-y-4">
-                  <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm flex items-center gap-2 border-b border-zinc-800 pb-2">
-                    <History className="w-4 h-4" /> Real-time event log
-                  </h3>
-                  <div ref={logContainerRef} className={`bg-black border border-zinc-800/50 rounded-lg p-3 transition-all ${isLogsExpanded ? 'max-h-[50vh] overflow-y-auto' : 'max-h-[160px] overflow-hidden'}`}>
-                    {events.length === 0 ? (
-                      <div className="text-zinc-700 italic text-xs py-8 text-center">Waiting for session activity...</div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {displayedEvents.map(ev => (
-                           <div key={ev.id} className="font-mono text-[10px] border-b border-zinc-900/40 pb-1.5 flex gap-3 animate-in slide-in-from-top-1">
-                              <span className="text-zinc-600 shrink-0 font-bold">{new Date(ev.ts).toLocaleTimeString([], { hour12: false })}</span>
-                              <span className={`font-black shrink-0 uppercase tracking-tighter w-24 truncate ${getEventColor(ev.type)}`}>{ev.type.replace(/_/g, ' ')}</span>
-                              <span className="text-zinc-400 truncate">{ev.context.playerName ? <span className="text-gold-500 font-bold">{ev.context.playerName.toUpperCase()} </span> : ''}{ev.context.delta ? <span className={ev.context.delta > 0 ? 'text-green-500' : 'text-red-500'}>({ev.context.delta > 0 ? '+' : ''}{ev.context.delta}) </span> : ''}{ev.context.note || ev.context.message || ''}</span>
-                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex justify-end gap-3 mt-2">
-                    <button onClick={() => { soundService.playClick(); setIsLogsExpanded(!isLogsExpanded); }} className="text-[10px] uppercase font-bold text-zinc-500 hover:text-white transition-colors">{isLogsExpanded ? 'Collapse log' : 'Expand history'}</button>
-                  </div>
-                </div>
-             </div>
-          </div>
+        {activeTab === 'SETTINGS' && (
+          <DirectorSettingsPanel 
+            settings={gameState.viewSettings} 
+            onUpdateSettings={updateViewSettings} 
+          />
         )}
 
-        {/* === BOARD EDITOR TAB === */}
         {activeTab === 'BOARD' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                   <div className="text-gold-500"><Timer className="w-5 h-5" /></div>
-                   <div>
-                     <p className="text-xs font-bold uppercase text-zinc-400">Timer Control</p>
-                     <div className="flex gap-1 mt-1">
-                       {[15, 30, 60].map(d => (
-                         <button key={d} type="button" onClick={() => updateTimer({ duration: d })} className={`px-2 py-0.5 text-[10px] rounded border ${gameState.timer.duration === d ? 'bg-gold-600 text-black border-gold-600' : 'bg-black text-zinc-400 border-zinc-800'}`}>{d}s</button>
-                       ))}
-                     </div>
-                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {!gameState.timer.isRunning ? <button type="button" onClick={startTimer} className="bg-green-600 hover:bg-green-500 text-white p-2 rounded-full"><Play className="w-4 h-4" /></button> : <button type="button" onClick={stopTimer} className="bg-yellow-600 hover:bg-yellow-500 text-black p-2 rounded-full"><Pause className="w-4 h-4" /></button>}
-                  <button type="button" onClick={resetTimer} className="bg-zinc-800 hover:bg-zinc-700 text-white p-2 rounded-full"><RotateCcw className="w-4 h-4" /></button>
-                </div>
-              </div>
-              <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex flex-col gap-4">
-                 <div className="flex items-center justify-between"><div className="flex items-center gap-2"><Layout className="w-4 h-4 text-gold-500" /><span className="text-xs font-bold uppercase text-zinc-400 tracking-wider">Board View settings</span></div></div>
-                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Type className="w-3 h-3" /> Board Font</label>
-                       <div className="flex bg-black p-1 rounded gap-1 border border-zinc-800">
-                          {[0.85, 1.0, 1.15, 1.25, 1.35].map((scale, i) => (
-                             <button key={scale} type="button" onClick={() => updateViewSettings({ boardFontScale: scale })} className={`flex-1 py-1 text-[9px] font-bold rounded ${gameState.viewSettings?.boardFontScale === scale ? 'bg-gold-600 text-black' : 'text-zinc-500 hover:text-white'}`}>{['XS', 'S', 'M', 'L', 'XL'][i]}</button>
-                          ))}
-                       </div>
-                    </div>
-                 </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-               <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Live Board Control</h3>
-               {gameState.activeQuestionId && <button type="button" onClick={() => { soundService.playClick(); onUpdateState({...gameState, activeQuestionId: null, activeCategoryId: null}); }} className="bg-red-900/50 text-red-200 border border-red-800 px-3 py-1 rounded text-xs font-bold uppercase flex items-center gap-2 hover:bg-red-900"><MonitorOff className="w-3 h-3" /> Force Close Active Q</button>}
-            </div>
-            
+          <div className="space-y-8 animate-in fade-in duration-300">
+            <DirectorAiRegenerator gameState={gameState} onUpdateState={onUpdateState} addToast={addToast} />
             <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${gameState.categories.length}, minmax(180px, 1fr))` }}>
               {gameState.categories.map((cat, cIdx) => (
-                <div key={cat.id} className="space-y-2">
-                  <div className="flex items-center gap-2 mb-2">
-                    <input value={cat.title} onChange={e => handleUpdateCategoryTitle(cIdx, e.target.value)} className="bg-zinc-900 text-gold-400 font-bold text-xs p-2 rounded w-full border border-transparent focus:border-gold-500 outline-none" />
+                <div key={cat.id} className="space-y-3">
+                  <div className="group relative">
+                    <input value={cat.title} onChange={e => handleUpdateCategoryTitle(cIdx, e.target.value)} className="bg-zinc-900 text-gold-400 font-bold text-xs p-2 rounded w-full border border-transparent focus:border-gold-500 outline-none pr-8" />
+                    <button onClick={() => handleAiRewriteCategory(cIdx)} className="absolute right-1 top-1 p-1 text-zinc-600 hover:text-purple-400 transition-colors" title="Regenerate this category only"><Wand2 className="w-3.5 h-3.5" /></button>
                   </div>
                   {cat.questions.map((q, qIdx) => (
-                    <div key={q.id} onClick={() => { 
-                        logger.info("director_view_tile", { ts: new Date().toISOString(), tileId: q.id, hasQuestion: !!q.text, hasAnswer: !!q.answer });
-                        if (!q.answer) logger.warn("director_answer_missing", { ts: new Date().toISOString(), tileId: q.id });
-                        soundService.playClick(); 
-                        setEditingQuestion({cIdx, qIdx}); 
-                      }} 
-                      className={`p-3 rounded border flex flex-col gap-1 cursor-pointer transition-all hover:brightness-110 relative ${q.isVoided ? 'bg-red-900/20 border-red-800' : q.isAnswered ? 'bg-zinc-900 border-zinc-800 opacity-60' : 'bg-zinc-800 border-zinc-700'}`}>
+                    <div key={q.id} onClick={() => setEditingQuestion({cIdx, qIdx})} className={`p-3 rounded border flex flex-col gap-1 cursor-pointer transition-all hover:brightness-110 relative ${q.isVoided ? 'bg-red-900/20 border-red-800' : q.isAnswered ? 'bg-zinc-900 border-zinc-800 opacity-60' : 'bg-zinc-800 border-zinc-700'}`}>
                       <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500"><span>{q.points}</span>{q.isVoided && <span className="text-red-500 font-bold uppercase">Void</span>}{q.isDoubleOrNothing && <span className="text-gold-500 font-bold">2x</span>}</div>
                       <p className="text-xs text-zinc-300 line-clamp-2 leading-tight font-bold">{q.text}</p>
                       <div className="mt-2 pt-2 border-t border-zinc-700/40">
                         <span className="text-[9px] text-zinc-500 uppercase font-black block tracking-widest leading-none mb-1">Answer</span>
-                        <p className={`text-[10px] leading-tight font-roboto-bold ${q.answer ? 'text-gold-400' : 'text-zinc-600 italic'}`}>
-                          {q.answer || '(MISSING)'}
-                        </p>
+                        <p className={`text-[10px] leading-tight font-roboto-bold ${q.answer ? 'text-gold-400' : 'text-zinc-600 italic'}`}>{q.answer || '(MISSING)'}</p>
                       </div>
                     </div>
                   ))}
@@ -536,7 +263,6 @@ export const DirectorPanel: React.FC<Props> = ({
           </div>
         )}
 
-        {/* === PLAYERS TAB === */}
         {activeTab === 'PLAYERS' && (
           <div className="max-w-4xl mx-auto space-y-4">
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
@@ -567,28 +293,13 @@ export const DirectorPanel: React.FC<Props> = ({
                        <td className="p-3 text-center"><span className="text-purple-300 font-mono font-bold">{p.stealsCount || 0}</span></td>
                        <td className="p-3">
                           <div className="flex items-center justify-center gap-3">
-                            <button 
-                              type="button" 
-                              title="Increment Wildcard Usage"
-                              onClick={() => handleUseWildcard(p.id)} 
-                              disabled={(p.wildcardsUsed || 0) >= 4 || processingWildcards.has(p.id)} 
-                              className={`flex items-center gap-2 px-3 py-1 rounded text-[10px] font-bold uppercase transition-all ${(p.wildcardsUsed || 0) >= 4 ? 'bg-zinc-800 text-zinc-500 border border-zinc-700' : 'bg-gold-600/20 text-gold-500 hover:bg-gold-600/40 border border-gold-600/50'}`}
-                            >
+                            <button onClick={() => handleUseWildcard(p.id)} disabled={(p.wildcardsUsed || 0) >= 4 || processingWildcards.has(p.id)} className={`flex items-center gap-2 px-3 py-1 rounded text-[10px] font-bold uppercase transition-all ${(p.wildcardsUsed || 0) >= 4 ? 'bg-zinc-800 text-zinc-500 border border-zinc-700' : 'bg-gold-600/20 text-gold-500 hover:bg-gold-600/40 border border-gold-600/50'}`}>
                               {processingWildcards.has(p.id) ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Star className={`w-3 h-3 ${(p.wildcardsUsed || 0) >= 4 ? 'text-zinc-500' : 'text-gold-500 fill-gold-500'}`} />}
                               { (p.wildcardsUsed || 0) >= 4 ? 'MAX 4 USED' : `${p.wildcardsUsed || 0}/4` }
                             </button>
-                            <button 
-                              type="button" 
-                              title="Reset Wildcards"
-                              onClick={() => handleResetWildcard(p.id)} 
-                              disabled={(p.wildcardsUsed || 0) === 0} 
-                              className="p-1.5 rounded text-zinc-500 hover:text-white hover:bg-zinc-700 disabled:opacity-30"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                            </button>
                           </div>
                        </td>
-                       <td className="p-3 text-right"><button type="button" onClick={() => handleDeletePlayer(p)} className="text-zinc-600 hover:text-red-500 p-1"><Trash2 className="w-4 h-4" /></button></td>
+                       <td className="p-3 text-right"><button onClick={() => handleDeletePlayer(p)} className="text-zinc-600 hover:text-red-500 p-1"><Trash2 className="w-4 h-4" /></button></td>
                      </tr>
                    ))}
                  </tbody>
@@ -596,17 +307,8 @@ export const DirectorPanel: React.FC<Props> = ({
              </div>
           </div>
         )}
-
-        {/* === CONFIG TAB === */}
-        {activeTab === 'GAME' && (
-          <div className="max-w-xl mx-auto space-y-6">
-             <h3 className="text-gold-500 font-bold uppercase tracking-widest text-sm">Production Settings</h3>
-             <div className="space-y-2"><label className="text-xs uppercase text-zinc-500 font-bold">Show Title</label><input value={gameState.showTitle} onChange={e => handleUpdateTitle(e.target.value)} className="w-full bg-black border border-zinc-800 p-3 rounded text-white focus:border-gold-500 outline-none font-bold" /></div>
-          </div>
-        )}
       </div>
 
-      {/* QUESTION EDIT MODAL */}
       {editingQuestion && (() => {
         const { cIdx, qIdx } = editingQuestion;
         const cat = gameState.categories[cIdx];
@@ -614,14 +316,14 @@ export const DirectorPanel: React.FC<Props> = ({
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="w-full max-w-lg bg-zinc-900 border border-gold-500/50 rounded-xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
-              <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2"><div><h3 className="text-gold-500 font-bold">{cat.title} // {q.points}</h3>{q.isVoided && <span className="text-red-500 text-xs font-bold uppercase tracking-wider">Voided</span>}</div><button type="button" onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button></div>
+              <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2"><div><h3 className="text-gold-500 font-bold">{cat.title} // {q.points}</h3></div><button onClick={() => setEditingQuestion(null)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button></div>
               <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
                 <div><label className="text-xs uppercase text-zinc-500 font-bold">Question</label><textarea id="dir-q-text" defaultValue={q.text} className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-24 focus:border-gold-500 outline-none font-bold" /></div>
                 <div><label className="text-xs uppercase text-zinc-500 font-bold">Answer</label><textarea id="dir-q-answer" defaultValue={q.answer} className="w-full bg-black border border-zinc-700 text-white p-3 rounded mt-1 h-16 focus:border-gold-500 outline-none font-bold" /></div>
               </div>
               <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-zinc-800">
-                <button type="button" onClick={() => { soundService.playClick(); setEditingQuestion(null); }} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
-                <button type="button" onClick={() => { const txt = (document.getElementById('dir-q-text') as HTMLTextAreaElement).value; const ans = (document.getElementById('dir-q-answer') as HTMLTextAreaElement).value; handleSaveQuestion(cIdx, qIdx, { text: txt, answer: ans, isVoided: false }); }} className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-6 py-2 rounded flex items-center gap-2"><Save className="w-4 h-4" />{q.isVoided ? 'Replace & Restore' : 'Save Changes'}</button>
+                <button onClick={() => setEditingQuestion(null)} className="px-4 py-2 text-zinc-400 hover:text-white text-sm">Cancel</button>
+                <button onClick={() => { const txt = (document.getElementById('dir-q-text') as HTMLTextAreaElement).value; const ans = (document.getElementById('dir-q-answer') as HTMLTextAreaElement).value; handleSaveQuestion(cIdx, qIdx, { text: txt, answer: ans, isVoided: false }); }} className="bg-gold-600 hover:bg-gold-500 text-black font-bold px-6 py-2 rounded flex items-center gap-2"><Save className="w-4 h-4" />Save Changes</button>
               </div>
             </div>
           </div>

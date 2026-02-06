@@ -1,3 +1,4 @@
+
 import React, { useEffect } from 'react';
 import { Category, BoardViewSettings } from '../types';
 import { soundService } from '../services/soundService';
@@ -15,17 +16,15 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
     logger.info("trivia_board_theme_updated", { backgroundTheme: "luxury_light", atIso: new Date().toISOString() });
   }, []);
 
-  // Determine dynamic grid dimensions
   const colCount = categories.length;
   const rowCount = categories[0]?.questions.length || 5; 
 
-  const fontScale = viewSettings?.boardFontScale || 1.0;
-  const tileScale = viewSettings?.tileScale || 1.0;
-
-  // Custom CSS variable application
   const boardStyles = {
-    '--board-font-scale': fontScale,
-    '--tile-scale': tileScale,
+    '--board-font-scale': viewSettings?.boardFontScale || 1.0,
+    '--tile-scale': viewSettings?.tileScale || 1.0,
+    '--cat-font-scale': viewSettings?.categoryFontSizeScale || 1.0,
+    '--tile-font-scale': viewSettings?.tileFontSizeScale || 1.0,
+    '--tile-padding-scale': viewSettings?.tilePaddingScale || 1.0,
   } as React.CSSProperties;
 
   return (
@@ -33,7 +32,6 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
       className="h-full w-full flex flex-col p-2 md:p-4 font-roboto font-bold select-none min-h-[400px] lg:min-h-0"
       style={boardStyles}
     >
-      {/* The Board Grid */}
       <div 
         className="flex-1 grid gap-1.5 md:gap-3 w-full h-full min-h-0 min-w-0"
         style={{ 
@@ -41,7 +39,7 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
           gridTemplateRows: `auto repeat(${rowCount}, minmax(60px, 1fr))` 
         }}
       >
-        {/* Category Headers - Dark Navy with White Text (High Anchor) */}
+        {/* Category Headers */}
         {categories.map((cat) => (
           <div 
             key={cat.id} 
@@ -49,7 +47,7 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
           >
              <h3 
                 className="text-white uppercase leading-tight break-words line-clamp-2 w-full tracking-wide font-black" 
-                style={{ fontSize: `clamp(12px, calc(1.5vw * var(--board-font-scale)), 44px)` }} 
+                style={{ fontSize: `clamp(12px, calc(1.5vw * var(--cat-font-scale)), 64px)` }} 
              >
                {cat.title}
              </h3>
@@ -83,17 +81,17 @@ export const GameBoard: React.FC<Props> = ({ categories, onSelectQuestion, viewS
                      }
                    `}
                    style={{
-                     padding: `calc(4px * var(--tile-scale))`
+                     padding: `calc(4px * var(--tile-padding-scale))`
                    }}
                  >
                    {q.isVoided ? (
-                     <span className="font-mono text-red-600 font-black tracking-widest rotate-[-15deg]" style={{ fontSize: `clamp(10px, calc(1vw * var(--board-font-scale)), 20px)` }}>VOID</span>
+                     <span className="font-mono text-red-600 font-black tracking-widest rotate-[-15deg]" style={{ fontSize: `clamp(10px, calc(1vw * var(--tile-font-scale)), 20px)` }}>VOID</span>
                    ) : q.isAnswered ? (
-                     <span className="font-mono font-bold text-zinc-400" style={{ fontSize: `clamp(10px, calc(1vw * var(--board-font-scale)), 32px)` }}>---</span> 
+                     <span className="font-mono font-bold text-zinc-400" style={{ fontSize: `clamp(10px, calc(1vw * var(--tile-font-scale)), 32px)` }}>---</span> 
                    ) : (
                      <span 
                         className="group-hover:scale-110 transition-transform shadow-black drop-shadow-xl font-black"
-                        style={{ fontSize: `clamp(16px, calc(2.8vw * var(--board-font-scale)), 72px)` }}
+                        style={{ fontSize: `clamp(16px, calc(2.8vw * var(--tile-font-scale)), 96px)` }}
                      >
                        {q.points}
                      </span>

@@ -1,6 +1,5 @@
 
 
-
 export interface Question {
   id: string;
   text: string;
@@ -35,9 +34,14 @@ export interface GameTimer {
 }
 
 export interface BoardViewSettings {
-  boardFontScale: number; // 0.85 - 1.35
-  tileScale: number; // 0.85 - 1.15
-  scoreboardScale: number; // 0.9 - 1.4
+  boardFontScale: number; // Legacy/Global Scale
+  tileScale: number; // Legacy/Global Tile Scale
+  scoreboardScale: number; // Scoreboard width scale
+  // Granular Controls
+  categoryFontSizeScale: number; // 0.7 - 1.6
+  tileFontSizeScale: number; // 0.7 - 1.6
+  playerNameFontSizeScale: number; // 0.7 - 1.6
+  tilePaddingScale: number; // 0.5 - 1.5
   updatedAt: string;
 }
 
@@ -77,6 +81,9 @@ export type AnalyticsEventType =
   | 'AI_CATEGORY_REPLACE_START'
   | 'AI_CATEGORY_REPLACE_APPLIED'
   | 'AI_CATEGORY_REPLACE_FAILED'
+  | 'AI_BOARD_REGEN_START'
+  | 'AI_BOARD_REGEN_APPLIED'
+  | 'AI_BOARD_REGEN_FAILED'
   | 'PLAYER_ADDED'
   | 'PLAYER_REMOVED'
   | 'PLAYER_EDITED'
@@ -106,7 +113,6 @@ export interface GameAnalyticsEvent {
     showId?: string;
     templateId?: string;
     tileId?: string;
-    // Added playerId to resolve type errors in App.tsx and DirectorPanel.tsx
     playerId?: string;
     categoryIndex?: number;
     rowIndex?: number;
@@ -327,7 +333,7 @@ export interface GameTemplate {
   lastModified?: string;
 }
 
-// --- SPECIAL MOVES SYSTEM TYPES ---
+// --- SPECIAL MOVES ---
 
 export type SpecialMoveType = 'DOUBLE_TROUBLE' | 'TRIPLE_THREAT' | 'SABOTAGE' | 'MEGA_STEAL';
 
@@ -351,7 +357,7 @@ export interface SMSActiveMoveContext {
 
 export interface SpecialMovesState {
   version: string;
-  deployments: Record<string, SMSDeployment>;
+  deployments: Record<string, SMSDeployment>; // Key is tileId
   activeMove: SMSActiveMoveContext | null;
   updatedAt: number;
 }
