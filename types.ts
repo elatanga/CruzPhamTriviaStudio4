@@ -1,5 +1,3 @@
-
-
 export interface Question {
   id: string;
   text: string;
@@ -36,37 +34,12 @@ export interface GameTimer {
 }
 
 export interface BoardViewSettings {
-  // Canonical Sizing Model
   categoryTitleScale: SizeScale;
   playerNameScale: SizeScale;
   tileScale: SizeScale;
-  
-  // Layout Controls
-  scoreboardScale: number; // Width multiplier (0.8 - 1.4)
-  tilePaddingScale: number; // Spacing multiplier (0.5 - 1.5)
-  
-  // Metadata
+  scoreboardScale: number; 
+  tilePaddingScale: number; 
   updatedAt: string;
-}
-
-export interface PlayEvent {
-  id: string;
-  atIso: string;
-  atMs: number;
-  action: 'AWARD' | 'STEAL' | 'VOID' | 'RETURN';
-  tileId: string;
-  categoryIndex?: number;
-  categoryName?: string;
-  rowIndex?: number;
-  basePoints?: number;
-  effectivePoints?: number;
-  attemptedPlayerId?: string;
-  attemptedPlayerName?: string;
-  awardedPlayerId?: string;
-  awardedPlayerName?: string;
-  stealerPlayerId?: string;
-  stealerPlayerName?: string;
-  notes?: string;
 }
 
 export type AnalyticsEventType = 
@@ -77,6 +50,8 @@ export type AnalyticsEventType =
   | 'POINTS_AWARDED'
   | 'POINTS_STOLEN'
   | 'TILE_VOIDED'
+  | 'TILE_RESTORED'
+  | 'BOARD_RESTORED_ALL'
   | 'QUESTION_RETURNED'
   | 'QUESTION_EDITED'
   | 'AI_TILE_REPLACE_START'
@@ -101,7 +76,8 @@ export type AnalyticsEventType =
   | 'TIMER_RESET'
   | 'TIMER_FINISHED'
   | 'VIEW_SETTINGS_CHANGED'
-  | 'CATEGORY_RENAMED';
+  | 'CATEGORY_RENAMED'
+  | 'POINT_SCALE_CHANGED';
 
 export interface GameAnalyticsEvent {
   id: string;
@@ -126,11 +102,34 @@ export interface GameAnalyticsEvent {
     delta?: number;
     before?: any;
     after?: any;
+    fromScale?: number; // Specific for POINT_SCALE_CHANGED
+    toScale?: number;   // Specific for POINT_SCALE_CHANGED
     message?: string;
     note?: string;
-    // Added difficulty to context to fix Property 'difficulty' does not exist error in logFormatter.ts
     difficulty?: Difficulty;
+    restoredCount?: number; // Specific for BOARD_RESTORED_ALL
   };
+}
+
+// Added PlayEvent interface to support real-time play logging
+export interface PlayEvent {
+  id: string;
+  atIso: string;
+  atMs: number;
+  action: 'AWARD' | 'STEAL' | 'VOID' | 'RETURN';
+  tileId: string;
+  categoryIndex?: number;
+  categoryName: string;
+  rowIndex?: number;
+  basePoints: number;
+  effectivePoints?: number;
+  attemptedPlayerId?: string;
+  attemptedPlayerName: string;
+  awardedPlayerId?: string;
+  awardedPlayerName?: string;
+  stealerPlayerId?: string;
+  stealerPlayerName?: string;
+  notes?: string;
 }
 
 export interface GameState {
@@ -144,8 +143,9 @@ export interface GameState {
   history: string[];
   timer: GameTimer;
   viewSettings: BoardViewSettings;
-  lastPlays: PlayEvent[];
   events: GameAnalyticsEvent[]; 
+  // Added lastPlays to GameState for real-time play monitoring
+  lastPlays: PlayEvent[];
 }
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';

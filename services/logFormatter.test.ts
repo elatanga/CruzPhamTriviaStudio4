@@ -23,6 +23,18 @@ describe('formatDirectorLogLine Utility - Golden String Verification', () => {
     expect(result.sentence).toBe('Director awarded 200 points to ALICE.');
   });
 
+  it('LOCK: formats BOARD_RESTORED_ALL exactly', () => {
+    const evt = baseEvent('BOARD_RESTORED_ALL', { restoredCount: 20 });
+    const result = formatDirectorLogLine(evt, mockCtx);
+    expect(result.sentence).toBe('Director restored all 20 tiles on the board.');
+  });
+
+  it('LOCK: formats POINT_SCALE_CHANGED with scale context exactly', () => {
+    const evt = baseEvent('POINT_SCALE_CHANGED', { fromScale: 100, toScale: 50 });
+    const result = formatDirectorLogLine(evt, mockCtx);
+    expect(result.sentence).toBe('Director shifted point scale from 100 to 50.');
+  });
+
   it('LOCK: formats successful POINTS_STOLEN exactly', () => {
     const evt = baseEvent('POINTS_STOLEN', { 
       playerName: 'BOB', 

@@ -1,4 +1,3 @@
-
 import { Category, Question, SizeScale } from "../types";
 
 /**
@@ -11,8 +10,6 @@ export const normalizePlayerName = (name: string): string => {
 
 /**
  * Pure helper to apply AI questions to an existing category skeleton.
- * BUG FIX #1: This function explicitly ignores AI-generated points and IDs,
- * ensuring manual producer overrides are preserved.
  */
 export const applyAiCategoryPreservePoints = (existingCategory: Category, aiQuestions: Question[]): Category => {
   return {
@@ -30,14 +27,81 @@ export const applyAiCategoryPreservePoints = (existingCategory: Category, aiQues
 };
 
 /**
+ * Pure function to restore a specific tile to an active, unplayed state.
+ * Minimal, explicit state changes: content is strictly preserved.
+ */
+export const restoreTile = (categories: Category[], cIdx: number, qIdx: number): Category[] => {
+  const cat = categories[cIdx];
+  if (!cat || !cat.questions[qIdx]) return categories;
+  
+  const q = cat.questions[qIdx];
+  // Idempotency: skip if already active
+  if (!q.isAnswered && !q.isVoided && !q.isRevealed) return categories;
+
+  const nextCategories = [...categories];
+  const nextQs = [...nextCategories[cIdx].questions];
+  
+  nextQs[qIdx] = { 
+    ...q, 
+    isAnswered: false, 
+    isRevealed: false, 
+    isVoided: false 
+  };
+  
+  nextCategories[cIdx] = { ...nextCategories[cIdx], questions: nextQs };
+  return nextCategories;
+};
+
+/**
+ * Resets all tiles on the board to an active state.
+ * Performance optimized: avoids cloning categories or questions that are already active.
+ */
+export const restoreAllTiles = (categories: Category[]): { nextCategories: Category[], restoredCount: number } => {
+  let totalRestored = 0;
+  
+  const nextCategories = categories.map(cat => {
+    let catHasChanges = false;
+    const nextQs = cat.questions.map(q => {
+      if (q.isAnswered || q.isVoided || q.isRevealed) {
+        totalRestored++;
+        catHasChanges = true;
+        return { ...q, isAnswered: false, isRevealed: false, isVoided: false };
+      }
+      return q;
+    });
+    
+    return catHasChanges ? { ...cat, questions: nextQs } : cat;
+  });
+
+  // Return original reference if no changes to prevent unnecessary re-renders
+  return {
+    nextCategories: totalRestored > 0 ? nextCategories : categories,
+    restoredCount: totalRestored
+  };
+};
+
+/**
+ * Re-scales points across the board while keeping question content unchanged.
+ * Deterministic: points = (row index + 1) * newScale
+ */
+export const rescalePoints = (categories: Category[], newScale: number): Category[] => {
+  return categories.map(cat => ({
+    ...cat,
+    questions: cat.questions.map((q, qIdx) => ({ 
+      ...q, 
+      points: (qIdx + 1) * newScale 
+    }))
+  }));
+};
+
+/**
  * Central Mapping: Converts abstract scales to production pixel/scale values.
- * Used to drive GameBoard and Scoreboard CSS variables independently.
  */
 export const getScaleMap = (scale: SizeScale) => {
   const maps = {
     XS: { px: 10, factor: 0.65 },
     S:  { px: 13, factor: 0.82 },
-    M:  { px: 16, factor: 1.0 }, // Production Baseline
+    M:  { px: 16, factor: 1.0 },
     L:  { px: 20, factor: 1.22 },
     XL: { px: 24, factor: 1.5 }
   };
@@ -45,10 +109,5 @@ export const getScaleMap = (scale: SizeScale) => {
 };
 
 export const getCategoryTitleFontSize = (scale: SizeScale): number => getScaleMap(scale).px;
-
-export const getPlayerNameFontSize = (scale: SizeScale): number => {
-  // Player names cap at 22px to prevent scoreboard overflow even at XL scale
-  return Math.min(getScaleMap(scale).px, 22);
-};
-
+export const getPlayerNameFontSize = (scale: SizeScale): number => Math.min(getScaleMap(scale).px, 22);
 export const getTileScaleFactor = (scale: SizeScale): number => getScaleMap(scale).factor;

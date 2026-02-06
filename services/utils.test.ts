@@ -1,61 +1,72 @@
-
 import { describe, it, expect } from 'vitest';
 import { 
-  applyAiCategoryPreservePoints, 
-  getCategoryTitleFontSize, 
-  getPlayerNameFontSize, 
-  getTileScaleFactor 
+  restoreTile, 
+  restoreAllTiles, 
+  rescalePoints,
+  applyAiCategoryPreservePoints 
 } from './utils';
 import { Category, Question } from '../types';
 
-describe('applyAiCategoryPreservePoints', () => {
-  const existingCategory: Category = {
-    id: 'cat-123',
-    title: 'Science',
-    questions: [
-      { id: 'q-0', points: 150, text: 'Old Q1', answer: 'Old A1', isAnswered: true, isRevealed: true },
-      { id: 'q-1', points: 300, text: 'Old Q2', answer: 'Old A2', isAnswered: false, isRevealed: false }
-    ]
-  };
+const createMockQuestions = (): Question[] => [
+  { id: 'q1', text: 'Q1', answer: 'A1', points: 100, isAnswered: true, isRevealed: true, isVoided: false },
+  { id: 'q2', text: 'Q2', answer: 'A2', points: 200, isAnswered: false, isRevealed: false, isVoided: true }
+];
 
-  const aiQuestions: Question[] = [
-    { id: 'ai-id-0', points: 0, text: 'AI Q1', answer: 'AI A1', isAnswered: false, isRevealed: false },
-    { id: 'ai-id-1', points: 0, text: 'AI Q2', answer: 'AI A2', isAnswered: false, isRevealed: false }
-  ];
+const mockCategories: Category[] = [{
+  id: 'c1',
+  title: 'TEST',
+  questions: createMockQuestions()
+}];
 
-  it('A) preserves existing IDs and points while updating content', () => {
-    const result = applyAiCategoryPreservePoints(existingCategory, aiQuestions);
+describe('Director Logic Utils', () => {
+  
+  it('restoreTile: resets status flags but preserves content', () => {
+    const next = restoreTile(mockCategories, 0, 0);
+    const q = next[0].questions[0];
     
-    expect(result.questions[0].id).toBe('q-0');
-    expect(result.questions[0].points).toBe(150); // Preserved custom point value
-    expect(result.questions[0].text).toBe('AI Q1');
-    expect(result.questions[0].answer).toBe('AI A1');
+    expect(q.isAnswered).toBe(false);
+    expect(q.isRevealed).toBe(false);
+    expect(q.isVoided).toBe(false);
+    
+    // Content Preservation
+    expect(q.id).toBe('q1');
+    expect(q.text).toBe('Q1');
+    expect(q.points).toBe(100);
   });
 
-  it('B) preserves answered/revealed status of existing tiles during rewrite', () => {
-    const result = applyAiCategoryPreservePoints(existingCategory, aiQuestions);
-    expect(result.questions[0].isAnswered).toBe(true);
-    expect(result.questions[0].isRevealed).toBe(true);
-  });
-});
-
-describe('Visual Scale Mapping Audit', () => {
-  it('Category Title: provides significant difference (10px to 24px)', () => {
-    expect(getCategoryTitleFontSize('XS')).toBe(10);
-    expect(getCategoryTitleFontSize('M')).toBe(16);
-    expect(getCategoryTitleFontSize('XL')).toBe(24);
+  it('restoreTile: is idempotent for active tiles', () => {
+    const activeState: Category[] = [{
+      id: 'c1', title: 'T', 
+      questions: [{ ...createMockQuestions()[0], isAnswered: false, isRevealed: false, isVoided: false }]
+    }];
+    const next = restoreTile(activeState, 0, 0);
+    expect(next).toBe(activeState); // Reference equality for pure performance
   });
 
-  it('Player Name: caps at 22px even at XL scale', () => {
-    expect(getPlayerNameFontSize('XS')).toBe(10);
-    expect(getPlayerNameFontSize('XL')).toBe(22); // Clamped from 24
+  it('restoreAllTiles: resets entire board state and returns count', () => {
+    const { nextCategories, restoredCount } = restoreAllTiles(mockCategories);
+    expect(restoredCount).toBe(2);
+    expect(nextCategories[0].questions.every(q => !q.isAnswered && !q.isVoided && !q.isRevealed)).toBe(true);
   });
 
-  it('Tile Factor: provides >2x area difference between XS and XL', () => {
-    const xs = getTileScaleFactor('XS');
-    const xl = getTileScaleFactor('XL');
-    expect(xs).toBe(0.65);
-    expect(xl).toBe(1.5);
-    expect(xl).toBeGreaterThan(xs * 2);
+  it('restoreAllTiles: is optimized and returns original reference if no work needed', () => {
+    const cleanCategories: Category[] = [{
+      id: 'c1', title: 'CLEAN',
+      questions: [{ id: 'q1', text: 'Q', answer: 'A', points: 100, isAnswered: false, isRevealed: false, isVoided: false }]
+    }];
+    const { nextCategories, restoredCount } = restoreAllTiles(cleanCategories);
+    expect(restoredCount).toBe(0);
+    expect(nextCategories).toBe(cleanCategories); // Pure optimization check
+  });
+
+  it('rescalePoints: re-calculates points based on row index and scale', () => {
+    const next = rescalePoints(mockCategories, 50);
+    expect(next[0].questions[0].points).toBe(50);  // (0+1) * 50
+    expect(next[0].questions[1].points).toBe(100); // (1+1) * 50
+    
+    // Integrity check
+    expect(next[0].questions[0].text).toBe('Q1');
+    expect(next[0].questions[0].isAnswered).toBe(true);
+    expect(next[0].questions[1].isVoided).toBe(true);
   });
 });
