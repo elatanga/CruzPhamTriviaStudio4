@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp, Sparkles, Sliders, Loader2, Minus, Plus } from 'lucide-react';
+import { Settings, Users, Grid, Edit, Save, X, RefreshCw, Wand2, MonitorOff, ExternalLink, RotateCcw, Play, Pause, Timer, Type, Layout, Star, Trash2, AlertTriangle, UserPlus, Check, BarChart3, Info, Hash, Clock, History, Copy, Trash, Download, ChevronDown, ChevronUp, Sparkles, Sliders, Loader2, Minus, Plus, ShieldAlert } from 'lucide-react';
 import { GameState, Question, Difficulty, Category, BoardViewSettings, Player, PlayEvent, AnalyticsEventType, GameAnalyticsEvent } from '../types';
 import { generateSingleQuestion, generateCategoryQuestions } from '../services/geminiService';
 import { logger } from '../services/logger';
@@ -35,6 +36,7 @@ export const DirectorPanel: React.FC<Props> = ({
   const [processingWildcards, setProcessingWildcards] = useState<Set<string>>(new Set());
   const [isAddingPlayer, setIsAddingPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
+  const [confirmResetAll, setConfirmResetAll] = useState(false);
 
   // --- CLEANUP ON MODAL CLOSE ---
   useEffect(() => {
@@ -69,6 +71,55 @@ export const DirectorPanel: React.FC<Props> = ({
       logger.error('director_player_update_failed', { error: e.message, playerId: id });
       addToast('error', 'Failed to update contestant');
     }
+  };
+
+  const handleUseWildcard = (id: string) => {
+    const p = gameState.players.find(x => x.id === id);
+    if (!p) return;
+    
+    const used = p.wildcardsUsed || 0;
+    if (used >= 4) {
+      addToast('error', 'Player reached maximum wildcards');
+      return;
+    }
+
+    soundService.playClick();
+    const nextUsed = used + 1;
+    logger.info('director_wildcard_use', { playerId: id, count: nextUsed });
+    
+    emitGameEvent('WILDCARD_USED', { 
+      actor: { role: 'director' }, 
+      context: { playerId: id, playerName: p.name, after: nextUsed } 
+    });
+
+    handleUpdatePlayer(id, 'wildcardsUsed', nextUsed);
+  };
+
+  const handleResetWildcards = (id: string) => {
+    const p = gameState.players.find(x => x.id === id);
+    if (!p) return;
+
+    soundService.playClick();
+    logger.info('director_wildcard_reset', { playerId: id });
+    
+    emitGameEvent('WILDCARD_RESET', { 
+      actor: { role: 'director' }, 
+      context: { playerId: id, playerName: p.name } 
+    });
+
+    handleUpdatePlayer(id, 'wildcardsUsed', 0);
+  };
+
+  const handleResetAllWildcards = () => {
+    soundService.playClick();
+    logger.info('director_wildcard_reset_all');
+    
+    const nextPlayers = gameState.players.map(p => ({ ...p, wildcardsUsed: 0 }));
+    onUpdateState({ ...gameState, players: nextPlayers });
+    
+    emitGameEvent('WILDCARD_RESET', { actor: { role: 'director' }, context: { note: 'Reset All Players' } });
+    setConfirmResetAll(false);
+    addToast('info', 'All Wildcards Reset');
   };
 
   const handleRemovePlayer = (id: string) => {
@@ -358,7 +409,7 @@ export const DirectorPanel: React.FC<Props> = ({
         )}
 
         {activeTab === 'PLAYERS' && (
-          <div className="space-y-6 animate-in fade-in duration-300 max-w-5xl mx-auto">
+          <div className="space-y-6 animate-in fade-in duration-300 max-w-7xl mx-auto">
             <div className="flex justify-between items-center bg-zinc-900/40 p-5 rounded-2xl border border-zinc-800 shadow-lg">
               <div>
                 <h3 className="text-gold-500 font-black uppercase tracking-widest text-xs flex items-center gap-2">
@@ -366,13 +417,30 @@ export const DirectorPanel: React.FC<Props> = ({
                 </h3>
                 <p className="text-[10px] text-zinc-500 uppercase font-bold mt-1 tracking-wider">Live roster overrides for game session</p>
               </div>
-              <button 
-                onClick={() => setIsAddingPlayer(true)}
-                disabled={(gameState.players || []).length >= 8}
-                className="bg-gold-600 hover:bg-gold-500 text-black font-black px-5 py-2.5 rounded-xl text-[10px] flex items-center gap-2 uppercase disabled:opacity-30 transition-all shadow-xl shadow-gold-900/10 active:scale-95"
-              >
-                <UserPlus className="w-4 h-4" /> Add Player
-              </button>
+              <div className="flex gap-2">
+                {!confirmResetAll ? (
+                  <button 
+                    onClick={() => setConfirmResetAll(true)}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-black px-4 py-2.5 rounded-xl text-[10px] flex items-center gap-2 uppercase transition-all"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Reset All Wildcards
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleResetAllWildcards}
+                    className="bg-red-600 hover:bg-red-500 text-white font-black px-4 py-2.5 rounded-xl text-[10px] flex items-center gap-2 uppercase animate-pulse shadow-lg shadow-red-900/20"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" /> Click to Confirm Reset All
+                  </button>
+                )}
+                <button 
+                  onClick={() => setIsAddingPlayer(true)}
+                  disabled={(gameState.players || []).length >= 8}
+                  className="bg-gold-600 hover:bg-gold-500 text-black font-black px-5 py-2.5 rounded-xl text-[10px] flex items-center gap-2 uppercase disabled:opacity-30 transition-all shadow-xl shadow-gold-900/10 active:scale-95"
+                >
+                  <UserPlus className="w-4 h-4" /> Add Player
+                </button>
+              </div>
             </div>
 
             {isAddingPlayer && (
@@ -396,6 +464,8 @@ export const DirectorPanel: React.FC<Props> = ({
                   <tr>
                     <th className="p-5 border-b border-zinc-800">Contestant Name</th>
                     <th className="p-5 border-b border-zinc-800">Live Score</th>
+                    <th className="p-5 border-b border-zinc-800">Wildcards</th>
+                    <th className="p-5 border-b border-zinc-800">Steals</th>
                     <th className="p-5 border-b border-zinc-800 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -425,8 +495,36 @@ export const DirectorPanel: React.FC<Props> = ({
                           ><Plus className="w-4 h-4"/></button>
                         </div>
                       </td>
+                      <td className="p-5">
+                        <div className="flex items-center gap-2">
+                           <button 
+                             disabled={(p.wildcardsUsed || 0) >= 4}
+                             onClick={() => handleUseWildcard(p.id)}
+                             title="Increment Wildcard Usage"
+                             className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase flex items-center gap-2 transition-all active:scale-95 ${(p.wildcardsUsed || 0) >= 4 ? 'bg-zinc-800 border-zinc-700 text-zinc-600 cursor-not-allowed' : 'bg-gold-600/10 border-gold-600/30 text-gold-500 hover:bg-gold-600 hover:text-black'}`}
+                           >
+                             <Star className={`w-3 h-3 ${(p.wildcardsUsed || 0) > 0 ? 'fill-current' : ''}`} /> 
+                             {(p.wildcardsUsed || 0) >= 4 ? 'MAX 4 USED' : `${p.wildcardsUsed || 0}/4`}
+                           </button>
+                           <button 
+                             disabled={(p.wildcardsUsed || 0) === 0}
+                             onClick={() => handleResetWildcards(p.id)}
+                             title="Reset Wildcards"
+                             className="p-2 text-zinc-600 hover:text-red-500 disabled:opacity-0 transition-all"
+                           >
+                             <RotateCcw className="w-4 h-4" />
+                           </button>
+                        </div>
+                      </td>
+                      <td className="p-5">
+                        <div className="flex items-center gap-2 text-purple-400">
+                          <ShieldAlert className="w-4 h-4" />
+                          <span className="font-mono font-black text-sm">{p.stealsCount || 0}</span>
+                        </div>
+                      </td>
                       <td className="p-5 text-right">
                         <button 
+                          /* Fix: Replace undefined 'id' with 'p.id' */
                           onClick={() => handleRemovePlayer(p.id)}
                           className="p-3 text-zinc-800 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500/10 rounded-xl"
                           title="Delete Contestant"
@@ -438,7 +536,7 @@ export const DirectorPanel: React.FC<Props> = ({
                   ))}
                   {(!gameState.players || gameState.players.length === 0) && (
                     <tr>
-                      <td colSpan={3} className="p-16 text-center text-zinc-700 italic text-[11px] uppercase font-black tracking-[0.3em] bg-black/20">
+                      <td colSpan={5} className="p-16 text-center text-zinc-700 italic text-[11px] uppercase font-black tracking-[0.3em] bg-black/20">
                         No contestants registered for this session
                       </td>
                     </tr>

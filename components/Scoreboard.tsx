@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { Plus, Minus, Maximize2, Minimize2, UserPlus } from 'lucide-react';
+import { Plus, Minus, Maximize2, Minimize2, UserPlus, ShieldAlert, Star } from 'lucide-react';
 import { Player, BoardViewSettings } from '../types';
 import { soundService } from '../services/soundService';
 import { logger } from '../services/logger';
@@ -31,6 +30,7 @@ export const Scoreboard: React.FC<Props> = ({
       playerCount,
       layoutMode: is2Col ? "grid-2col" : "list-1col",
       scoreboardScale: viewSettings?.scoreboardScale || 1.0,
+      viewport: { w: window.innerWidth, h: window.innerHeight }
     });
   }, [playerCount, is2Col, viewSettings?.scoreboardScale]);
 
@@ -40,6 +40,16 @@ export const Scoreboard: React.FC<Props> = ({
       onAddPlayer(newName);
       setNewName('');
     }
+  };
+
+  const getWildcardStars = (used: number = 0) => {
+    if (used <= 0) return null;
+    const color = used >= 4 ? '#FFD400' : '#FF8A00'; // Yellow for Max, Orange for 1-3
+    return (
+      <span style={{ color }} className="font-mono text-[10px] md:text-sm drop-shadow-sm tracking-tighter">
+        {'★'.repeat(used)}
+      </span>
+    );
   };
 
   const scoreboardStyles = {
@@ -77,6 +87,7 @@ export const Scoreboard: React.FC<Props> = ({
           {players.map(p => {
             const isSelected = p.id === selectedPlayerId;
             const displayName = (p.name || "").toUpperCase();
+            const stealsCount = p.stealsCount || 0;
 
             return (
               <div 
@@ -84,13 +95,23 @@ export const Scoreboard: React.FC<Props> = ({
                 onClick={() => onSelectPlayer(p.id)}
                 className={`relative px-3 rounded border transition-all duration-200 cursor-pointer group flex items-center justify-between min-w-0 h-full ${isSelected ? 'bg-gold-900/30 border-gold-500 shadow-[0_0_15px_rgba(255,215,0,0.2)] scale-[1.01]' : 'bg-zinc-900/40 border-zinc-800 hover:border-zinc-600'}`}
               >
-                <div className="flex items-center min-w-0 flex-1 mr-2 overflow-hidden gap-1 md:gap-2">
-                  <span 
-                    className="truncate pr-1 font-roboto-bold tracking-wide uppercase transition-colors" 
-                    style={{ fontSize: 'var(--name-font-px)', color: isSelected ? 'white' : 'rgb(161 161 170)' }}
-                  >
-                    {displayName}
-                  </span>
+                <div className="flex flex-col min-w-0 flex-1 mr-2 overflow-hidden">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span 
+                      className="truncate font-roboto-bold tracking-wide uppercase transition-colors" 
+                      style={{ fontSize: 'var(--name-font-px)', color: isSelected ? 'white' : 'rgb(161 161 170)' }}
+                    >
+                      {displayName}
+                    </span>
+                    {stealsCount > 0 && (
+                      <span className="bg-purple-900/40 border border-purple-500/30 text-purple-400 text-[8px] font-black px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                        STEALS: {stealsCount}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 h-3">
+                    {getWildcardStars(p.wildcardsUsed)}
+                  </div>
                 </div>
                 
                 <div className="flex items-center gap-2 shrink-0">
