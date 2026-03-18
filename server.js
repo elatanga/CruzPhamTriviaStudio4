@@ -26,6 +26,9 @@ const REQUIRED_KEYS = [
   "FIREBASE_APP_ID",
 ];
 
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server is running on port ${PORT}`);
+});
 // 2. RUNTIME CONFIG ENDPOINT (Must be defined BEFORE static files)
 app.get("/runtime-config.js", (req, res) => {
   res.setHeader("Content-Type", "application/javascript; charset=utf-8");
@@ -89,12 +92,12 @@ app.get("*", (req, res) => {
 });
 
 // 6. START SERVER
-try {
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`SERVER: Listening on port ${PORT}`);
-    console.log(`SERVER: Serving build from ${buildPath}`);
-    console.log(`SERVER: Environment ${process.env.NODE_ENV}`);
-  });
+//try {
+ // const server = app.listen(PORT, '0.0.0.0', () => {
+   // console.log(`SERVER: Listening on port ${PORT}`);
+  //  console.log(`SERVER: Serving build from ${buildPath}`);
+  //  console.log(`SERVER: Environment ${process.env.NODE_ENV}`);
+//  });
   
   // Graceful Shutdown
   process.on('SIGTERM', () => {
