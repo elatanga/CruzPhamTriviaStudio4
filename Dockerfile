@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Copy package files and install all dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy the rest of the application
 COPY . .
@@ -21,6 +21,7 @@ WORKDIR /app
 # Set environment to production
 ENV NODE_ENV=production
 
+ENV PORT=8080
 # Copy package files and install production dependencies only
 COPY package*.json ./
 RUN npm install --omit=dev
@@ -34,4 +35,4 @@ COPY --from=builder /app/build ./build
 EXPOSE 8080
 
 # Start the Express server
-CMD ["node", "server.js"]
+CMD ["npm", "start"]
