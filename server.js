@@ -65,7 +65,7 @@ app.get("/_health", (req, res) => {
 });
 
 // 4. STATIC FILES
-const buildPath = path.join(__dirname, "build");
+const buildPath = path.join(__dirname, "dist");
 app.use(express.static(buildPath, { 
   maxAge: "1h", 
   etag: true,
