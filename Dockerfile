@@ -17,7 +17,7 @@ RUN npm run build
 FROM node:20-slim
 
 WORKDIR /app
-
+RUN npm install --only=production
 # Set environment to production
 ENV NODE_ENV=production
 
