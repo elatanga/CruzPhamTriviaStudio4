@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build --outDir build",
+    "start": "node server.js",
     "preview": "vite preview"
   },
   "dependencies": {
